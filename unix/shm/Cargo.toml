@@ -1,0 +1,8 @@
+[package]
+name = "shm"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+libc = { version = "0.2.60", features = [ "extra_traits" ] }

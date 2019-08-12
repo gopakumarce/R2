@@ -1,0 +1,15 @@
+[package]
+name = "l2_eth_decap"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+common = { path = "../../../../common" }
+names = { path = "../../../../names" }
+graph = { path = "../../../../graph" }
+packet = { path = "../../../../packet" }
+fwd = { path = "../../../../fwd" }
+counters = { path = "../../../../counters" }
+log = { path = "../../../../log" }
+msg = { path = "../../../../msg" }

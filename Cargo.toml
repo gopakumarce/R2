@@ -1,0 +1,34 @@
+[workspace]
+members = [
+    "names",
+    "graph",
+    "packet",
+    "sched",
+    "fwd",
+    "log",
+    "counters",
+    "api",
+    "msg",
+    "main",
+    "unix/socket",
+    "unix/epoll",
+    "unix/efd",
+    "unix/shm",
+    "gnodes/layer2/eth/decap",
+    "gnodes/layer2/eth/encap",
+    "gnodes/layer3/ipv4/parse",
+    "gnodes/layer3/ipv4/fwd",
+    "gnodes/interface",
+    "apis/log",
+    "apis/interface",
+    "apis/route",
+    "utils/r2cnt",
+    "utils/r2intf",
+    "utils/r2log",
+    "utils/r2rt",
+]
+
+# The development profile, used for `cargo build`
+[profile.dev]
+opt-level = 0  # Controls the --opt-level the compiler builds with
+debug = true   # Controls whether the compiler passes `-g`

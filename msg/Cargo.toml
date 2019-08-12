@@ -1,0 +1,13 @@
+[package]
+name = "msg"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+treebitmap = "0.4.0"
+common = { path = "../common" }
+fwd = { path = "../fwd" }
+graph = { path = "../graph" }
+counters = { path = "../counters" }
+log = { path = "../log" }

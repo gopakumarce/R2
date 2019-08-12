@@ -1,0 +1,30 @@
+[package]
+name = "r2"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+thrift = "0.13.0"
+common = { path = "../common" }
+packet = { path = "../packet" }
+graph = { path = "../graph" }
+names = { path = "../names" }
+api = { path = "../api" }
+sched = { path = "../sched" }
+socket = { path = "../unix/socket" }
+epoll = { path = "../unix/epoll" }
+efd = { path = "../unix/efd" }
+counters = { path = "../counters" }
+fwd = { path = "../fwd" }
+log = { path = "../log" }
+msg = { path = "../msg" }
+l2_eth_encap = { path = "../gnodes/layer2/eth/encap" }
+l2_eth_decap = { path = "../gnodes/layer2/eth/decap" }
+l3_ipv4_parse = { path = "../gnodes/layer3/ipv4/parse" }
+l3_ipv4_fwd = { path = "../gnodes/layer3/ipv4/fwd" }
+interface = { path = "../gnodes/interface" }
+apis_interface = { path = "../apis/interface" }
+apis_log = { path = "../apis/log" }
+apis_route = { path = "../apis/route" }
+

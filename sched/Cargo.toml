@@ -1,0 +1,12 @@
+[package]
+name = "sched"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+
+common = { path = "../common" }
+packet = { path = "../packet" }
+counters = { path = "../counters" }
+msg = { path = "../msg" }

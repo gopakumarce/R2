@@ -1,0 +1,14 @@
+[package]
+name = "l3_ipv4_fwd"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+names = { path = "../../../../names" }
+graph = { path = "../../../../graph" }
+msg = { path = "../../../../msg" }
+packet = { path = "../../../../packet" }
+counters = { path = "../../../../counters" }
+fwd = { path = "../../../../fwd" }
+log = { path = "../../../../log" }

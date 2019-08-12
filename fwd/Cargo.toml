@@ -1,0 +1,11 @@
+[package]
+name = "fwd"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+treebitmap = "0.4.0"
+common = { path = "../common" }
+counters = { path = "../counters" }
+log = { path = "../log" }

@@ -1,0 +1,13 @@
+[package]
+name = "r2intf"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+thrift = "0.13.0"
+clap = { version = "2.33.0", features = ["yaml"]}
+api = { path = "../../api" }
+common = { path = "../../common" }
+fwd = { path = "../../fwd" }
+apis_interface = { path = "../../apis/interface" }

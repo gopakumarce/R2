@@ -1,0 +1,9 @@
+[package]
+name = "counters"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+common = { path = "../common" }
+shm = { path = "../unix/shm" }

@@ -1,0 +1,30 @@
+name: r2rt
+version: "1.0"
+author: Gopa Kumar
+about: Configure routing
+subcommands:
+  - route:
+      about: Add or delete routes
+      args:
+        - IPMASK:
+            help: IP Address and Mask
+            required: true
+        - NHOP:
+            help: Next Hop IP Address
+            required: true
+        - IFNAME:
+            help: Interface Name
+            required: true
+        - delete:
+            long: del
+            help: delete route ? default is add
+            takes_value: false
+  - show:
+      about: Show routes
+      args:
+        - PREFIX:
+            help: Prefix to display, or "all" to show all routes
+            required: true
+        - FILENAME:
+            help: file name to write routes to
+            required: false

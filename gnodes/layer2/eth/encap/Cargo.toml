@@ -1,0 +1,15 @@
+[package]
+name = "l2_eth_encap"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+common = { path = "../../../../common" }
+names = { path = "../../../../names" }
+graph = { path = "../../../../graph" }
+fwd = { path = "../../../../fwd" }
+packet = { path = "../../../../packet" }
+counters = { path = "../../../../counters" }
+log = { path = "../../../../log" }
+msg = { path = "../../../../msg" }

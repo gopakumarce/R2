@@ -1,0 +1,8 @@
+name: r2log
+version: "1.0"
+author: Gopa Kumar
+about: write logs to file
+args:
+  - FILENAME:
+      help: file name
+      required: false

@@ -1,0 +1,19 @@
+[package]
+name = "interface"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+crossbeam-queue = "0.2.1"
+names = { path = "../../names" }
+common = { path = "../../common" }
+graph = { path = "../../graph" }
+packet = { path = "../../packet" }
+sched = { path = "../../sched" }
+fwd = { path = "../../fwd" }
+msg = { path = "../../msg" }
+counters = { path = "../../counters" }
+log = { path = "../../log" }
+efd = { path = "../../unix/efd" }
+socket = { path = "../../unix/socket" }

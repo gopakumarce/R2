@@ -1,0 +1,8 @@
+[package]
+name = "apis_route"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+thrift = "0.13.0"

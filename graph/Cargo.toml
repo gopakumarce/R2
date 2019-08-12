@@ -1,0 +1,14 @@
+[package]
+name = "graph"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+crossbeam = "0.7"
+crossbeam-queue = "0.1"
+
+names = { path = "../names" }
+packet = { path = "../packet" }
+counters = { path = "../counters" }
+log = { path = "../log" }

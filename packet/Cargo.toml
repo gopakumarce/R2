@@ -1,0 +1,10 @@
+[package]
+name = "packet"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+fwd = { path = "../fwd" }
+counters = { path = "../counters" }
+crossbeam-queue = "0.2.1"

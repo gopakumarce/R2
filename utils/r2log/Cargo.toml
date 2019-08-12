@@ -1,0 +1,12 @@
+[package]
+name = "r2log"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+thrift = "0.13.0"
+clap = "2.33.0"
+api = { path = "../../api" }
+common = { path = "../../common" }
+apis_log = { path = "../../apis/log" }

@@ -1,0 +1,120 @@
+name: r2intf
+version: "1.0"
+author: Gopa Kumar
+about: Configure interface related parameters
+args:
+  - IFNAME:
+      help: Interface Name
+      required: true
+subcommands:
+  - add:
+      about: add interface
+      args:
+        - IFINDEX:
+            help: Interface Index
+            required: true
+        - MAC:
+            help: Mac address in aa:bb:cc:dd:ee:ff format
+            required: true
+  - ip:
+      about: configure ip address
+      args:
+        - IPMASK:
+            help: IP address and mask in format 1.1.1.1/24 for example
+            required: true
+  - class:
+      about: add or delete qos classes
+      args:
+        - delete:
+            long: del
+            help: delete class ? default is add
+            takes_value: false
+        - CLASS:
+            help: Class Name
+            required: true
+        - PARENT:
+            help: Parent Class Name
+            required: true
+        - qlimit:
+            long: qlimit
+            required: false
+            takes_value: true
+            value_name: qlimit
+            help: Queue limit
+        - leaf:
+            long: leaf
+            required: false
+            takes_value: false
+            help: Is this class a leaf (ie packet queue) ?
+        - fm1:
+            long: fm1
+            value_name: fm1
+            required: true
+            takes_value: true
+            help: Mandatory fairshare m1
+        - fd:
+            long: fd
+            value_name: fd
+            required: true
+            takes_value: true
+            help: Mandatory fairshare d
+        - fm2:
+            long: fm2
+            value_name: fm2
+            required: true
+            takes_value: true
+            help: Mandatory fairshare m2
+        - rm1:
+            long: rm1
+            value_name: rm1
+            requires:
+              - rd
+              - rm2
+            required: false
+            takes_value: true
+            help: Optional realtime m1
+        - rd:
+            long: rd
+            value_name: rd
+            requires:
+              - rm1
+              - rm2
+            required: false
+            takes_value: true
+            help: Optional realtime d
+        - rm2:
+            long: rm2
+            value_name: rm2
+            requires:
+              - rm1
+              - rd
+            required: false
+            takes_value: true
+            help: Optional realtime m2
+        - um1:
+            long: um1
+            value_name: um1
+            requires:
+              - ud
+              - um2
+            required: false
+            takes_value: true
+            help: Optional upperlimit m1
+        - ud:
+            long: ud
+            value_name: ud
+            requires:
+              - um1
+              - um2
+            required: false
+            takes_value: true
+            help: Optional upperlimit d
+        - um2:
+            long: um2
+            value_name: um2
+            requires:
+              - um1
+              - ud
+            required: false
+            takes_value: true
+            help: Optional upperlimit m2
