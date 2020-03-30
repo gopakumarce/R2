@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
+# Exit on error
+set -e
+
 # If R2 is already running, kill it, this script will again launch R2 
-pkill r2
+pkill r2 || true
 
 # Create two docker containers using the tiny busybox image 
 docker create -t --name R2_client1 busybox sh
