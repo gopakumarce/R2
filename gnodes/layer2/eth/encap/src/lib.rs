@@ -44,8 +44,8 @@ impl EncapMux {
     }
 }
 
-impl<T> Gclient<T> for EncapMux {
-    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<T>> {
+impl<'p, T: 'p> Gclient<'p, T> for EncapMux {
+    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, T>> {
         Box::new(EncapMux {
             next_names: self.next_names.clone(),
         })
@@ -83,17 +83,12 @@ struct Cnt {
 // receive. This mechanism needs rethinking (see github issue #4)
 pub struct EthEncap {
     intf: Arc<Interface>,
-    pool: Arc<dyn PacketPool>,
     mac: HashMap<Ipv4Addr, EthMacRaw>,
     cnt: Cnt,
 }
 
 impl EthEncap {
-    pub fn new(
-        intf: Arc<Interface>,
-        pool: Arc<dyn PacketPool>,
-        counters: &mut Counters,
-    ) -> EthEncap {
+    pub fn new(intf: Arc<Interface>, counters: &mut Counters) -> Self {
         let bad_mac = Counter::new(
             counters,
             &l2_eth_encap(intf.ifindex),
@@ -102,7 +97,6 @@ impl EthEncap {
         );
         EthEncap {
             intf,
-            pool,
             mac: HashMap::new(),
             cnt: Cnt { bad_mac },
         }
@@ -121,8 +115,12 @@ impl EthEncap {
         v
     }
 
-    fn do_arp_request(&self, in_pkt: &BoxPkt) -> Option<BoxPkt> {
-        let pkt = self.pool.pkt(0 /* no headroom */);
+    fn do_arp_request<'p>(
+        &self,
+        pool: &mut dyn PacketPool<'p>,
+        in_pkt: &BoxPkt<'p>,
+    ) -> Option<BoxPkt<'p>> {
+        let pkt = pool.pkt(0 /* no headroom */);
         pkt.as_ref()?;
         let mut pkt = pkt.unwrap();
         let raw = pkt.data_raw_mut();
@@ -188,14 +186,19 @@ impl EthEncap {
         }
     }
 
-    fn add_eth_hdr(&self, pkt: &mut BoxPkt, mac: &EthMacRaw) -> bool {
-        if !pkt.prepend(&ETH_TYPE_IPV4.to_be_bytes()) {
+    fn add_eth_hdr<'p>(
+        &self,
+        pool: &mut dyn PacketPool<'p>,
+        pkt: &mut BoxPkt<'p>,
+        mac: &EthMacRaw,
+    ) -> bool {
+        if !pkt.prepend(pool, &ETH_TYPE_IPV4.to_be_bytes()) {
             return false;
         }
-        if !pkt.prepend(&self.intf.l2_addr[0..ETH_ALEN]) {
+        if !pkt.prepend(pool, &self.intf.l2_addr[0..ETH_ALEN]) {
             return false;
         }
-        if !pkt.prepend(&(*mac.bytes)) {
+        if !pkt.prepend(pool, &(*mac.bytes)) {
             return false;
         }
         pkt.set_l2(ETH_ALEN);
@@ -203,26 +206,25 @@ impl EthEncap {
     }
 }
 
-impl Gclient<R2Msg> for EthEncap {
-    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<R2Msg>> {
+impl<'p> Gclient<'p, R2Msg<'p>> for EthEncap {
+    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, R2Msg<'p>>> {
         let bad_mac = Counter::new(counters, &self.name(), CounterType::Error, "bad_mac");
         Box::new(EthEncap {
             intf: self.intf.clone(),
-            pool: self.pool.clone(),
             mac: HashMap::new(),
             cnt: Cnt { bad_mac },
         })
     }
 
-    fn dispatch(&mut self, _thread: usize, vectors: &mut Dispatch) {
+    fn dispatch<'d>(&mut self, _thread: usize, vectors: &mut Dispatch<'d, 'p>) {
         while let Some(mut p) = vectors.pop() {
             let mac = self.mac.get(&p.out_l3addr);
             if let Some(mac) = mac {
-                if self.add_eth_hdr(&mut p, mac) {
+                if self.add_eth_hdr(vectors.pool, &mut p, mac) {
                     vectors.push(Next::TX as usize, p);
                 }
             } else {
-                let arp = self.do_arp_request(&p);
+                let arp = self.do_arp_request(vectors.pool, &p);
                 if let Some(arp) = arp {
                     vectors.push(Next::TX as usize, arp);
                 }

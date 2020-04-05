@@ -2,17 +2,17 @@ use super::*;
 use apis_log::{LogErr, LogSyncHandler};
 use std::fs::File;
 
-pub struct LogApis {
-    r2: Arc<Mutex<R2>>,
+pub struct LogApis<'p> {
+    r2: Arc<Mutex<R2<'p>>>,
 }
 
-impl LogApis {
+impl<'p> LogApis<'p> {
     pub fn new(r2: Arc<Mutex<R2>>) -> LogApis {
         LogApis { r2 }
     }
 }
 
-impl LogSyncHandler for LogApis {
+impl<'p> LogSyncHandler for LogApis<'p> {
     fn handle_show(&self, filename: String) -> thrift::Result<()> {
         let r2 = self.r2.lock().unwrap();
         for t in r2.threads.iter() {

@@ -1,60 +1,335 @@
+use core::marker::PhantomData;
+use core::mem::ManuallyDrop;
 use counters::flavors::{Counter, CounterType};
 use counters::Counters;
 use crossbeam_queue::ArrayQueue;
 use fwd::ZERO_IP;
+use std::alloc::alloc;
+use std::alloc::Layout;
 use std::cmp::min;
+use std::collections::VecDeque;
 use std::mem;
 use std::net::Ipv4Addr;
 use std::ops::{Deref, DerefMut};
-use std::ptr::copy_nonoverlapping;
-use std::slice::{from_raw_parts, from_raw_parts_mut};
+use std::slice::from_raw_parts_mut;
 use std::sync::Arc;
 
-// A packet is composed of a chain of particles. The particle has some meta data
-// and a 'raw' buffer of size 'rlen', which is what holds the actual data. Every
-// particle in a packet will have the same fixed size 'raw' buffers. Though we
-// dont mandate it, usually all particles in the entire system will have the same
-// fixed raw buffer size. Particle structure is not directly accessed by any client,
-// its public just because the packet/particle pool implementations provided outside,
-// need to know about Particle
-pub struct Particle {
-    raw: *const u8,
-    rlen: usize,
-    head: usize,
-    tail: usize,
-    next: Option<BoxPart>,
-}
+// A BoxPart basically is a pointer to a Particle structure, this allows particles
+// to come from pools, where the pool implementor has freedom to decide what memory
+// is used for the particle raw data and even the Particle structure itself.
+pub struct BoxPart<'p>(*mut Particle<'p>);
 
-impl Particle {
-    pub fn new(raw: *const u8, rlen: usize) -> Particle {
-        Particle {
-            raw,
-            rlen,
+impl<'p> BoxPart<'p> {
+    pub fn size() -> usize {
+        mem::size_of::<Particle>()
+    }
+
+    pub fn align() -> usize {
+        mem::align_of::<Particle>()
+    }
+
+    /// # Safety
+    /// This function takes raw pointers and converts it into a Particle, the part pointer
+    /// should have space enough to hold the Particle structure. The raw pointer should
+    /// have a length of rlen bytes
+    pub unsafe fn new(part: *mut u8, raw: *mut u8, rlen: usize) -> Self {
+        #[allow(clippy::cast_ptr_alignment)]
+        let part = part as *mut Particle;
+        *part = Particle {
+            raw: from_raw_parts_mut(raw, rlen),
             head: 0,
             tail: 0,
             next: None,
-        }
+        };
+        BoxPart(part)
     }
 
     // reinit is called on a particle thats was used before and given back to the
     // particle pool and now being allocated again from the pool
     pub fn reinit(&mut self, headroom: usize) {
-        assert!(headroom <= self.rlen);
+        assert!(headroom <= self.raw.len());
         self.head = headroom;
         self.tail = headroom;
         self.next = None;
     }
+}
 
+impl<'p> Drop for BoxPart<'p> {
+    // A particle is never expected to go out of scope without
+    // being attached to a packet. The packet drop() will free
+    // the particle(s), so nothing to be done here
+    fn drop(&mut self) {}
+}
+
+// Deref mechanisms to allow accessing a BoxPart as a Particle
+impl<'p> Deref for BoxPart<'p> {
+    type Target = Particle<'p>;
+
+    fn deref(&self) -> &Particle<'p> {
+        unsafe { &*self.0 }
+    }
+}
+
+impl<'p> DerefMut for BoxPart<'p> {
+    fn deref_mut(&mut self) -> &mut Particle<'p> {
+        unsafe { &mut *self.0 }
+    }
+}
+
+/// The clients will all deal with BoxPkt structure - its nothing but a pointer
+/// to the Packet structure. The Packet structure memory can come from anywhere
+/// that the packet pool implementor choses, but of course the memory has to be
+/// valid across all threads in R2 because we can send packets from one thread
+/// to another.
+pub struct BoxPkt<'p> {
+    pkt: ManuallyDrop<*mut Packet<'p>>,
+    /// Once the packet is freed, its queued back here
+    queue: ManuallyDrop<Arc<ArrayQueue<BoxPkt<'p>>>>,
+}
+
+impl<'p> BoxPkt<'p> {
+    pub fn size() -> usize {
+        mem::size_of::<Packet>()
+    }
+
+    pub fn align() -> usize {
+        mem::align_of::<Packet>()
+    }
+
+    /// # Safety
+    /// This function takes raw pointers and converts it into a Packet, the raw pointer
+    /// should have space enough to hold the Packet structure
+    pub unsafe fn new(
+        raw: *mut u8,
+        particle: BoxPart<'p>,
+        queue: Arc<ArrayQueue<BoxPkt<'p>>>,
+    ) -> Self {
+        #[allow(clippy::cast_ptr_alignment)]
+        let pkt = raw as *mut Packet;
+        *pkt = Packet {
+            particle: ManuallyDrop::new(particle),
+            length: 0,
+            l2: 0,
+            l2_len: 0,
+            l3: 0,
+            l3_len: 0,
+            in_ifindex: 0,
+            out_ifindex: 0,
+            out_l3addr: ZERO_IP,
+            _ph: PhantomData,
+        };
+        BoxPkt {
+            pkt: ManuallyDrop::new(pkt),
+            queue: ManuallyDrop::new(queue),
+        }
+    }
+
+    // reinit() is called on packets which were previously used and returned to the packet pool,
+    // and now its being allocated from the pool again
+    pub fn reinit(&mut self, headroom: usize) {
+        self.length = 0;
+        self.l2 = 0;
+        self.l2_len = 0;
+        self.l3 = 0;
+        self.l3_len = 0;
+        self.l3_len = 0;
+        self.in_ifindex = 0;
+        self.out_ifindex = 0;
+        self.out_l3addr = ZERO_IP;
+        self.particle.reinit(headroom);
+    }
+}
+
+/// By default because BoxPkt is a pointer to a Packet, it wont be Send because
+/// Rust will not allow pointers/addresses to be send across threads. We override
+/// it here because we have the _guarantee_ that these addresses are valid across all
+/// threads in R2
+unsafe impl<'p> Send for BoxPkt<'p> {}
+
+// Deref mechanisms to allow accessing a BoxPkt as Packet
+impl<'p> Deref for BoxPkt<'p> {
+    type Target = Packet<'p>;
+
+    fn deref(&self) -> &Packet<'p> {
+        unsafe { &**self.pkt }
+    }
+}
+
+impl<'p> DerefMut for BoxPkt<'p> {
+    fn deref_mut(&mut self) -> &mut Packet<'p> {
+        unsafe { &mut **self.pkt }
+    }
+}
+
+impl<'p> Drop for BoxPkt<'p> {
+    fn drop(&mut self) {
+        // The packet goes back to the pool after this, do not touch
+        // it anymore
+        unsafe {
+            let pkt = ManuallyDrop::take(&mut self.pkt);
+            let queue = ManuallyDrop::take(&mut self.queue);
+            self.queue
+                .push(BoxPkt {
+                    pkt: ManuallyDrop::new(pkt),
+                    queue: ManuallyDrop::new(queue),
+                })
+                .unwrap();
+        }
+    }
+}
+
+/// External clients are free to implement their own versions of a packet pool, the pool
+/// should provide the below methods. And all the addresses/memory in the pool should be
+/// valid across all R2 threads. Each thread has a pool of their own. But the pools are
+/// all created by the control thread and then passed over to the forwarding threads,
+/// hence the reason we need the Send trait
+pub trait PacketPool<'p>: Send {
+    /// Allocate a packet with one particle. Expect allocation failures - hence the Option return
+    fn pkt(&mut self, headroom: usize) -> Option<BoxPkt<'p>>;
+    /// Allocate a particle (with the raw data), again expect allocation failure
+    fn particle(&mut self, headroom: usize) -> Option<BoxPart<'p>>;
+    /// Free a packet which has a single particle with it
+    fn free_pkt(&mut self, pkt: BoxPkt<'p>);
+    /// Free a particle
+    fn free_part(&mut self, part: BoxPart<'p>);
+    /// Return the fixed max-size of the particle's raw data buffer
+    fn particle_sz(&self) -> usize;
+
+    /// When the packet is freed, except the first particle, give all the other particles
+    /// back to the particle pool. And then give the packet (with the first particle intact)
+    /// also back to the pool. In other words an alloc from a packet pool is more optimized
+    /// for the case of a 'single particle packet'
+    fn free(&mut self, mut pkt: BoxPkt<'p>) {
+        let mut part = pkt.particle.next.take();
+        while let Some(mut p) = part {
+            let next = p.next.take();
+            // The particle goes back to the pool after this, do not touch
+            // it anymore
+            let p = unsafe { ManuallyDrop::take(&mut p) };
+            self.free_part(p);
+            part = next;
+        }
+        // The packet goes back to the pool after this, do not touch
+        // it anymore
+        self.free_pkt(pkt);
+    }
+}
+
+/// Here we provide a default packet pool implementation, where the Packet, Particle and
+/// the particle's raw data buffer all comes from the heap.
+pub struct PktsHeap<'p> {
+    alloc_fail: Counter,
+    pkts: VecDeque<BoxPkt<'p>>,
+    particles: VecDeque<BoxPart<'p>>,
+    particle_sz: usize,
+}
+
+unsafe impl<'p> Send for PktsHeap<'p> {}
+
+/// A from-heap packet/particle pool, the pool is created with a specification of the
+/// number of packets, number of particles and max-size of each particle
+impl<'p> PktsHeap<'p> {
+    const PARTICLE_ALIGN: usize = 16;
+
+    /// #Safety
+    /// This API deals with constructing packets and particles starting from raw pointers,
+    /// hence this is marked unsafe
+    pub fn new(
+        queue: Arc<ArrayQueue<BoxPkt<'p>>>,
+        counters: &mut Counters,
+        num_pkts: usize,
+        num_parts: usize,
+        particle_sz: usize,
+    ) -> Self {
+        assert!(num_parts >= num_pkts);
+        let parts_left = num_parts - num_pkts;
+        let particles = VecDeque::with_capacity(parts_left);
+        let pkts = VecDeque::with_capacity(num_pkts);
+        let alloc_fail = Counter::new(counters, "PKTS_HEAP", CounterType::Error, "PktAllocFail");
+        let mut pool = PktsHeap {
+            alloc_fail,
+            pkts,
+            particles,
+            particle_sz,
+        };
+
+        unsafe {
+            for _ in 0..num_pkts {
+                let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
+                let raw: *mut u8 = alloc(lraw);
+                let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
+                let part: *mut u8 = alloc(lpart);
+                let lpkt = Layout::from_size_align(BoxPkt::size(), BoxPkt::align()).unwrap();
+                let pkt: *mut u8 = alloc(lpkt);
+                pool.pkts.push_front(BoxPkt::new(
+                    pkt,
+                    BoxPart::new(part, raw, particle_sz),
+                    queue.clone(),
+                ));
+            }
+
+            for _ in 0..parts_left {
+                let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
+                let raw: *mut u8 = alloc(lraw);
+                let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
+                let part: *mut u8 = alloc(lpart);
+                pool.particles
+                    .push_front(BoxPart::new(part, raw, particle_sz));
+            }
+        }
+        pool
+    }
+}
+
+impl<'p> PacketPool<'p> for PktsHeap<'p> {
+    fn pkt(&mut self, headroom: usize) -> Option<BoxPkt<'p>> {
+        if let Some(mut pkt) = self.pkts.pop_front() {
+            pkt.reinit(headroom);
+            Some(pkt)
+        } else {
+            self.alloc_fail.incr();
+            None
+        }
+    }
+
+    fn particle(&mut self, headroom: usize) -> Option<BoxPart<'p>> {
+        if let Some(mut part) = self.particles.pop_front() {
+            part.reinit(headroom);
+            Some(part)
+        } else {
+            self.alloc_fail.incr();
+            None
+        }
+    }
+
+    fn free_pkt(&mut self, pkt: BoxPkt<'p>) {
+        self.pkts.push_front(pkt);
+    }
+
+    fn free_part(&mut self, part: BoxPart<'p>) {
+        self.particles.push_front(part);
+    }
+
+    fn particle_sz(&self) -> usize {
+        self.particle_sz
+    }
+}
+
+// A packet is composed of a chain of particles. The particle has some meta data
+// and a 'raw' buffer, which is what holds the actual data. Every
+// particle in a packet will have the same fixed size 'raw' buffers. Though we
+// dont mandate it, usually all particles in the entire system will have the same
+// fixed raw buffer size.
+pub struct Particle<'p> {
+    raw: &'p mut [u8],
+    head: usize,
+    tail: usize,
+    next: Option<ManuallyDrop<BoxPart<'p>>>,
+}
+
+impl<'p> Particle<'p> {
     fn len(&self) -> usize {
         self.tail - self.head
-    }
-
-    fn slice(&self) -> &[u8] {
-        unsafe { from_raw_parts(self.raw, self.rlen) }
-    }
-
-    fn slice_mut(&mut self) -> &mut [u8] {
-        unsafe { from_raw_parts_mut(self.raw as *mut u8, self.rlen) }
     }
 
     fn data(&self, offset: usize) -> Option<(&[u8], usize)> {
@@ -62,24 +337,24 @@ impl Particle {
             return None;
         }
         Some((
-            &self.slice()[self.head + offset..self.tail],
+            &self.raw[self.head + offset..self.tail],
             self.len() - offset,
         ))
     }
 
     fn data_raw(&self, offset: usize) -> &[u8] {
-        if offset >= self.rlen {
+        if offset >= self.raw.len() {
             &[]
         } else {
-            &self.slice()[offset..]
+            &self.raw[offset..]
         }
     }
 
     fn data_raw_mut(&mut self, offset: usize) -> &mut [u8] {
-        if offset >= self.rlen {
+        if offset >= self.raw.len() {
             &mut []
         } else {
-            &mut self.slice_mut()[offset..]
+            &mut self.raw[offset..]
         }
     }
 
@@ -87,40 +362,30 @@ impl Particle {
     // as much as possible, return how much was added
     fn prepend(&mut self, data: &[u8]) -> usize {
         let dlen = data.len();
-        unsafe {
-            if dlen > self.head {
-                let count = self.head;
-                let src = data.as_ptr().add(dlen - count);
-                let dst = self.raw as *mut u8;
-                copy_nonoverlapping(src, dst, count);
-                self.head = 0;
-                count
-            } else {
-                let count = dlen;
-                let src = data.as_ptr().offset(0);
-                let dst = (self.raw as *mut u8).add(self.head - count);
-                copy_nonoverlapping(src, dst, count);
-                self.head -= count;
-                count
-            }
+        if dlen > self.head {
+            let count = self.head;
+            self.raw[0..count].clone_from_slice(&data[dlen - count..dlen]);
+            self.head = 0;
+            count
+        } else {
+            let count = dlen;
+            self.raw[self.head - count..self.head].clone_from_slice(&data[0..count]);
+            self.head -= count;
+            count
         }
     }
 
     // Add data after the 'tail', there might not be room for all the data, add
     // as much as possible, return how much was added
     fn append(&mut self, data: &[u8]) -> usize {
-        unsafe {
-            let len = min(self.rlen - self.tail, data.len());
-            let dst = (self.raw as *mut u8).add(self.tail);
-            let src = data.as_ptr().offset(0);
-            copy_nonoverlapping(src, dst, len);
-            self.tail += len;
-            len
-        }
+        let len = min(self.raw.len() - self.tail, data.len());
+        self.raw[self.tail..self.tail + len].clone_from_slice(&data[0..len]);
+        self.tail += len;
+        len
     }
 
     fn move_tail(&mut self, mv: isize) -> isize {
-        let len = self.rlen as isize;
+        let len = self.raw.len() as isize;
         let head = self.head as isize;
         let tail = self.tail as isize;
         let new_tail = tail + mv;
@@ -144,36 +409,12 @@ impl Particle {
         }
     }
 
-    fn last_particle(&mut self) -> &mut Particle {
-        if self.next.is_none() {
-            self
-        } else {
-            self.next.as_mut().unwrap().last_particle()
+    fn last_particle(&mut self) -> &mut Particle<'p> {
+        let mut p = self;
+        while p.next.is_some() {
+            p = p.next.as_deref_mut().unwrap();
         }
-    }
-}
-
-// A BoxPart basically is a pointer to a Particle structure, this allows particles
-// to come from pools, where the pool implementor has freedom to decide what memory
-// is used for the particle raw data and even the Particle structure itself
-pub struct BoxPart(pub *mut Particle);
-
-impl Drop for BoxPart {
-    fn drop(&mut self) {}
-}
-
-// Deref mechanisms to allow accessing a BoxPart as a Particle
-impl Deref for BoxPart {
-    type Target = Particle;
-
-    fn deref(&self) -> &Particle {
-        unsafe { &*self.0 }
-    }
-}
-
-impl DerefMut for BoxPart {
-    fn deref_mut(&mut self) -> &mut Particle {
-        unsafe { &mut *self.0 }
+        p
     }
 }
 
@@ -193,9 +434,9 @@ impl DerefMut for BoxPart {
 /// The Packet structure is never directly used by clients, clients will use
 /// BoxPkt structure, this is kept public just for packet/particle pool implementations
 /// outside the file which needs to know about these structures
-pub struct Packet {
+pub struct Packet<'p> {
     // The first particle
-    particle: BoxPart,
+    particle: ManuallyDrop<BoxPart<'p>>,
     // Total length of data in the packet
     length: usize,
     // The offset (from headroom) of the layer2 header
@@ -206,51 +447,21 @@ pub struct Packet {
     l3: usize,
     // Size of Layer3 header
     l3_len: usize,
-    /// The pool from which this packet was allocated
-    pub pool: Arc<dyn PacketPool>,
     /// The ifindex of the interface on which this packet came in
     pub in_ifindex: usize,
     /// The ifindex of the interface on which the packet will go out of
     pub out_ifindex: usize,
     /// The next-hop IPv4 address out of out_ifindex, to use for ARP
     pub out_l3addr: Ipv4Addr,
+    // Just to shut the compiler from complaining 'p is not used
+    _ph: PhantomData<&'p ()>,
 }
 
 #[allow(clippy::len_without_is_empty)]
-impl Packet {
-    pub fn new(pool: Arc<dyn PacketPool>, particle: BoxPart) -> Packet {
-        Packet {
-            particle,
-            length: 0,
-            l2: 0,
-            l2_len: 0,
-            l3: 0,
-            l3_len: 0,
-            pool,
-            in_ifindex: 0,
-            out_ifindex: 0,
-            out_l3addr: ZERO_IP,
-        }
-    }
-
-    // reinit() is called on packets which were previously used and returned to the packet pool,
-    // and now its being allocated from the pool again
-    pub fn reinit(&mut self, headroom: usize) {
-        self.length = 0;
-        self.l2 = 0;
-        self.l2_len = 0;
-        self.l3 = 0;
-        self.l3_len = 0;
-        self.l3_len = 0;
-        self.in_ifindex = 0;
-        self.out_ifindex = 0;
-        self.out_l3addr = ZERO_IP;
-        self.particle.reinit(headroom);
-    }
-
-    fn push_particle(&mut self, next: BoxPart) {
+impl<'p> Packet<'p> {
+    fn push_particle(&mut self, next: BoxPart<'p>) {
         let p = self.particle.last_particle();
-        p.next = Some(next);
+        p.next = Some(ManuallyDrop::new(next));
     }
 
     pub fn len(&self) -> usize {
@@ -261,16 +472,16 @@ impl Packet {
         self.particle.head
     }
 
-    pub fn prepend(&mut self, bytes: &[u8]) -> bool {
+    pub fn prepend(&mut self, pool: &mut dyn PacketPool<'p>, bytes: &[u8]) -> bool {
         let mut l = bytes.len();
         while l != 0 {
             let n = self.particle.prepend(&bytes[0..l]);
             if n != l {
-                let p = self.pool.particle(self.pool.particle_sz());
+                let p = pool.particle(pool.particle_sz());
                 if p.is_none() {
                     return false;
                 }
-                let p = p.unwrap();
+                let p = ManuallyDrop::new(p.unwrap());
                 let prev = mem::replace(&mut self.particle, p);
                 self.particle.next = Some(prev);
             }
@@ -280,14 +491,14 @@ impl Packet {
         true
     }
 
-    pub fn append(&mut self, bytes: &[u8]) -> bool {
+    pub fn append(&mut self, pool: &mut dyn PacketPool<'p>, bytes: &[u8]) -> bool {
         let mut offset = 0;
         while offset != bytes.len() {
             let p = self.particle.last_particle();
             let n = p.append(&bytes[offset..]);
             offset += n;
             if n == 0 {
-                let p = self.pool.particle(0);
+                let p = pool.particle(0);
                 if p.is_none() {
                     return false;
                 }
@@ -338,8 +549,8 @@ impl Packet {
 
     // the 'bytes' worth of data is the layer2 header that we want to add to the
     // head of the packet
-    pub fn push_l2(&mut self, bytes: &[u8]) -> bool {
-        if !self.prepend(bytes) {
+    pub fn push_l2(&mut self, pool: &mut dyn PacketPool<'p>, bytes: &[u8]) -> bool {
+        if !self.prepend(pool, bytes) {
             return false;
         }
         let p = &self.particle;
@@ -390,8 +601,8 @@ impl Packet {
 
     // the 'bytes' worth of data is the layer3 header that we want to add to the
     // head of the packet
-    pub fn push_l3(&mut self, bytes: &[u8]) -> bool {
-        if !self.prepend(bytes) {
+    pub fn push_l3(&mut self, pool: &mut dyn PacketPool<'p>, bytes: &[u8]) -> bool {
+        if !self.prepend(pool, bytes) {
             return false;
         }
         let p = &self.particle;
@@ -469,168 +680,5 @@ impl Packet {
         v
     }
 }
-
-/// The clients will all deal with BoxPkt structure - its nothing but a pointer
-/// to the Packet structure. The Packet structure memory can come from anywhere
-/// that the packet pool implementor choses, but of course the memory has to be
-/// valid across all threads in R2 because we can send packets from one thread
-/// to another.
-pub struct BoxPkt(pub *mut Packet);
-
-/// By default because BoxPkt is a pointer to a Packet, it wont be Send/Sync because
-/// Rust will not allow pointers/addresses to be shared across threads. We override
-/// it here because we have the _guarantee_ that these addresses are valid across all
-/// threads in R2
-unsafe impl Send for BoxPkt {}
-unsafe impl Sync for BoxPkt {}
-
-// Deref mechanisms to allow accessing a BoxPkt as Packet
-impl Deref for BoxPkt {
-    type Target = Packet;
-
-    fn deref(&self) -> &Packet {
-        unsafe { &*self.0 }
-    }
-}
-
-impl DerefMut for BoxPkt {
-    fn deref_mut(&mut self) -> &mut Packet {
-        unsafe { &mut *self.0 }
-    }
-}
-
-// When the packet is dropped, except the first particle, give all the other particles
-// back to the particle pool. And then give the packet (with the first particle intact)
-// also back to the pool. In other words an alloc from a packet pool is more optimized
-// for the case of a 'single particle packet'
-impl Drop for BoxPkt {
-    fn drop(&mut self) {
-        let mut part = self.particle.next.take();
-        while let Some(mut p) = part {
-            let next = p.next.take();
-            // The particle goes back to the pool after this, do not touch
-            // it anymore
-            self.pool.free_part(&p);
-            part = next;
-        }
-        // The packet goes back to the pool after this, do not touch
-        // it anymore
-        self.pool.free_pkt(self);
-    }
-}
-
-/// External clients are free to implement their own versions of a packet pool, the pool
-/// should provide the below methods. And all the addresses/memory in the pool should be
-/// valid across all R2 threads. Also the pool should be implemented in a thread safe
-/// manner since packets can move across threads in R2 - and hence also why we have
-/// Send + Sync in the trait.
-pub trait PacketPool: Send + Sync {
-    /// Allocate a packet with one particle. Expect allocation failures - hence the Option return
-    fn pkt(&self, headroom: usize) -> Option<BoxPkt>;
-    /// Allocate a particle (with the raw data), again expect allocation failure
-    fn particle(&self, headroom: usize) -> Option<BoxPart>;
-    /// Free a packet which has a single particle with it
-    fn free_pkt(&self, pkt: &BoxPkt);
-    /// Free a particle
-    fn free_part(&self, part: &BoxPart);
-    /// Return the fixed max-size of the particle's raw data buffer
-    fn particle_sz(&self) -> usize;
-    /// Free the entire pool
-    fn free(&self);
-}
-
-/// Here we provide a default packet pool implementation, where the Packet, Particle and
-/// the particle's raw data buffer all comes from the heap (using Box/Vec). We use the
-/// fixed size MPSC lockfree ArrayQueue for thread safety
-pub struct PktsHeap {
-    alloc_fail: Counter,
-    pkts: ArrayQueue<BoxPkt>,
-    particles: ArrayQueue<BoxPart>,
-    particle_sz: usize,
-}
-
-/// The pool has to be thread safe and can be used across threads. Since the pool deals
-/// with raw pointers, by default its not Send + Sync. Here since we _know_ that the
-/// addresses are all from the heap (Box/Vec) and are valid across threads, we override
-/// and force impl Send + Sync
-unsafe impl Send for PktsHeap {}
-unsafe impl Sync for PktsHeap {}
-
-/// A from-heap packet/particle pool, the pool is created with a specification of the
-/// number of packets, number of particles and max-size of each particle
-impl PktsHeap {
-    pub fn new(
-        counters: &mut Counters,
-        num_pkts: usize,
-        num_parts: usize,
-        particle_sz: usize,
-    ) -> Arc<PktsHeap> {
-        assert!(num_parts >= num_pkts);
-        let parts_left = num_parts - num_pkts;
-        let particles = ArrayQueue::new(parts_left);
-        let pkts = ArrayQueue::new(num_pkts);
-        let alloc_fail = Counter::new(counters, "PKTS_HEAP", CounterType::Error, "PktAllocFail");
-        let pool = Arc::new(PktsHeap {
-            alloc_fail,
-            pkts,
-            particles,
-            particle_sz,
-        });
-
-        for _ in 0..num_pkts {
-            let raw: Box<[u8]> = vec![0; particle_sz].into_boxed_slice();
-            let part = Box::new(Particle::new(raw.as_ptr(), particle_sz));
-            Box::leak(raw);
-            let pkt = Box::new(Packet::new(pool.clone(), BoxPart(Box::into_raw(part))));
-            pool.pkts.push(BoxPkt(Box::into_raw(pkt))).unwrap();
-        }
-
-        for _ in 0..parts_left {
-            let raw: Box<[u8]> = vec![0; particle_sz].into_boxed_slice();
-            let part = Box::new(Particle::new(raw.as_ptr(), particle_sz));
-            Box::leak(raw);
-            pool.particles.push(BoxPart(Box::into_raw(part))).unwrap();
-        }
-
-        pool
-    }
-}
-
-impl PacketPool for PktsHeap {
-    fn pkt(&self, headroom: usize) -> Option<BoxPkt> {
-        if let Ok(mut pkt) = self.pkts.pop() {
-            (*pkt).reinit(headroom);
-            Some(pkt)
-        } else {
-            self.alloc_fail.incr();
-            None
-        }
-    }
-
-    fn particle(&self, headroom: usize) -> Option<BoxPart> {
-        if let Ok(mut part) = self.particles.pop() {
-            (*part).reinit(headroom);
-            Some(part)
-        } else {
-            self.alloc_fail.incr();
-            None
-        }
-    }
-
-    fn free_pkt(&self, pkt: &BoxPkt) {
-        self.pkts.push(BoxPkt(pkt.0)).unwrap();
-    }
-
-    fn free_part(&self, part: &BoxPart) {
-        self.particles.push(BoxPart(part.0)).unwrap();
-    }
-
-    fn particle_sz(&self) -> usize {
-        self.particle_sz
-    }
-
-    fn free(&self) {}
-}
-
 #[cfg(test)]
 mod test;

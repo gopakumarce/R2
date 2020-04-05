@@ -69,8 +69,8 @@ impl IPv4Fwd {
     }
 }
 
-impl Gclient<R2Msg> for IPv4Fwd {
-    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<R2Msg>> {
+impl<'p> Gclient<'p, R2Msg<'p>> for IPv4Fwd {
+    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, R2Msg<'p>>> {
         let no_route = Counter::new(counters, &self.name(), CounterType::Pkts, "no_route");
         let invalid_l3 = Counter::new(counters, &self.name(), CounterType::Error, "invalid_l3");
         Box::new(IPv4Fwd {

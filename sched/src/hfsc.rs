@@ -219,18 +219,18 @@ fn rtsc_min(rtsc: &mut RuntimeSc, isc: &InternalSc, x: u64, y: u64) {
     rtsc.dy = dy;
 }
 
-pub struct Hfsc {
+pub struct Hfsc<'p> {
     root: usize,
     free_index: VecDeque<usize>,
     eligible: BTreeMap<Key, usize>,
-    classes: Vec<Class>,
+    classes: Vec<Class<'p>>,
     class_names: HashMap<String, usize>,
     get_time_ns: fn() -> u64,
     pkts_queued: usize,
 }
 
-impl Hfsc {
-    pub fn new(bandwidth: usize) -> Hfsc {
+impl<'p> Hfsc<'p> {
+    pub fn new(bandwidth: usize) -> Self {
         let f_sc = Sc {
             m1: 0,
             d: 0,
@@ -528,7 +528,7 @@ impl Hfsc {
         }
     }
 
-    pub fn enqueue(&mut self, classid: usize, pkt: BoxPkt) -> bool {
+    pub fn enqueue(&mut self, classid: usize, pkt: BoxPkt<'p>) -> bool {
         if classid >= self.classes.len() || !self.classes[classid].in_use {
             return false;
         }
@@ -559,7 +559,7 @@ impl Hfsc {
         true
     }
 
-    pub fn dequeue(&mut self) -> Option<BoxPkt> {
+    pub fn dequeue(&mut self) -> Option<BoxPkt<'p>> {
         let time = (self.get_time_ns)();
         let mut ret = None;
 
@@ -624,7 +624,7 @@ impl Hfsc {
     }
 }
 
-pub struct Class {
+pub struct Class<'p> {
     in_use: bool,
     leaf: bool,
     parent: usize,
@@ -652,10 +652,10 @@ pub struct Class {
     u_run: RuntimeSc,
     nactive: usize,
     children: BTreeMap<Key, usize>,
-    packets: VecDeque<BoxPkt>,
+    packets: VecDeque<BoxPkt<'p>>,
 }
 
-impl Class {
+impl<'p> Class<'p> {
     fn new(
         parent: usize,
         index: usize,
@@ -663,7 +663,7 @@ impl Class {
         is_leaf: bool,
         pvoff: u64,
         curves: Curves,
-    ) -> Class {
+    ) -> Self {
         let mut r_isc = None;
         let mut e_run = Default::default();
         let mut d_run = Default::default();
@@ -717,7 +717,7 @@ impl Class {
         }
     }
 
-    fn dummy() -> Class {
+    fn dummy() -> Self {
         let f_sc = Default::default();
         let curves = Curves {
             r_sc: None,
@@ -760,8 +760,8 @@ impl Class {
     }
 }
 
-impl Clone for Class {
-    fn clone(&self) -> Class {
+impl<'p> Clone for Class<'p> {
+    fn clone(&self) -> Self {
         Class {
             in_use: self.in_use,
             leaf: self.leaf,

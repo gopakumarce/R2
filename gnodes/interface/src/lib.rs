@@ -8,7 +8,6 @@ use log::Logger;
 use msg::R2Msg;
 use names::l2_eth_decap;
 use packet::BoxPkt;
-use packet::PacketPool;
 use sched::hfsc::Hfsc;
 use socket::RawSock;
 use std::sync::Arc;
@@ -34,31 +33,28 @@ fn next_name(ifindex: usize, next: Next) -> String {
 // get extended to have more options like DPDK etc.. The IfNode for an interface is
 // present in all forwarding threads, although only one thread is the 'owner' of the
 // interface. All other threads handoff packets to the 'owner' vis MPSC 'thread_q'
-pub struct IfNode {
+pub struct IfNode<'p> {
     name: String,
     thread_mask: u64,
     intf: Arc<Interface>,
-    sched: Hfsc,
+    sched: Hfsc<'p>,
     driver: Arc<RawSock>,
-    pool: Arc<dyn PacketPool>,
     sched_fail: Counter,
     threadq_fail: Counter,
-    thread_q: Arc<ArrayQueue<BoxPkt>>,
+    thread_q: Arc<ArrayQueue<BoxPkt<'p>>>,
     thread_wakeup: Arc<Efd>,
 }
 
-impl IfNode {
+impl<'p> IfNode<'p> {
     // thread_mask: specifies which thread owns the IfNode, we expect only one bit set in the mask
     // efd: event fd (efd) used to wakeup the owner thread when handing off packets on thread_q
     // intf: The common driver-agnostic parameters of an interface like ip address/mtu etc..
-    // pool: packet pool used by the interface to allocate packets/particles
     pub fn new(
         counters: &mut Counters,
         thread_mask: u64,
         efd: Arc<Efd>,
         intf: Arc<Interface>,
-        pool: Arc<dyn PacketPool>,
-    ) -> Result<IfNode, i32> {
+    ) -> Result<Self, i32> {
         let name = names::rx_tx(intf.ifindex);
         match RawSock::new(&intf.ifname, true) {
             Ok(sock) => {
@@ -73,7 +69,6 @@ impl IfNode {
                     intf,
                     sched,
                     driver: Arc::new(sock),
-                    pool,
                     sched_fail,
                     threadq_fail,
                     thread_q: Arc::new(ArrayQueue::new(VEC_SIZE)),
@@ -102,8 +97,12 @@ impl IfNode {
     }
 }
 
-impl Gclient<R2Msg> for IfNode {
-    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<R2Msg>> {
+impl<'p> Gclient<'p, R2Msg<'p>> for IfNode<'p> {
+    fn clone(
+        &self,
+        counters: &mut Counters,
+        _log: Arc<Logger>,
+    ) -> Box<dyn Gclient<'p, R2Msg<'p>> + 'p> {
         // Only the 'owner' IfNode really needs/uses a scheduler, so in all other nodes, the
         // sched doesnt really do anything, they handoff packets to the owner IfNode.
         let sched = sched::hfsc::Hfsc::new(common::MB!(10 * 1024));
@@ -115,7 +114,6 @@ impl Gclient<R2Msg> for IfNode {
             intf: self.intf.clone(),
             sched,
             driver: self.driver.clone(),
-            pool: self.pool.clone(),
             sched_fail,
             threadq_fail,
             thread_q: self.thread_q.clone(),
@@ -123,7 +121,7 @@ impl Gclient<R2Msg> for IfNode {
         })
     }
 
-    fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
+    fn dispatch<'d>(&mut self, thread: usize, vectors: &mut Dispatch<'d, 'p>) {
         let owner_thread = (self.thread_mask & (1 << thread)) != 0;
         // Do packet Tx if we are the owner thread (thread the driver/device is pinnned to).
         // If so send the packet out on the driver, otherwise enqueue the packet to the MPSC
@@ -156,7 +154,7 @@ impl Gclient<R2Msg> for IfNode {
         // Do packet Rx, only on the thread this driver is pinned to
         if owner_thread {
             for _ in 0..VEC_SIZE {
-                let pkt = self.pool.pkt(self.intf.headroom);
+                let pkt = vectors.pool.pkt(self.intf.headroom);
                 if pkt.is_none() {
                     break;
                 }

@@ -1,7 +1,9 @@
 use counters::flavors::{Counter, CounterType};
 use counters::Counters;
+use crossbeam_queue::ArrayQueue;
 use log::Logger;
 use packet::BoxPkt;
+use packet::PacketPool;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -14,16 +16,16 @@ const GRAPH_INIT_SZ: usize = 1024;
 pub const VEC_SIZE: usize = 256;
 
 /// Every graph node feature/client needs to implement these methods/APIs
-pub trait Gclient<T>: Send {
+pub trait Gclient<'p, T: 'p>: Send {
     /// Make a clone() of the node, usually to be used in another thread. It is upto the
     /// client to decide what should be cloned/copied and what should be shared. For example,
     /// counters are always per thread and cant be shared, a new set of counters need to be
     /// made per thread
-    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<T>>;
+    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, T> + 'p>;
     /// This API is called to hand over packets to the client for processing. Dispatch has
     /// pop() API to get packets destined for the node, and push() API to push packets to
     /// other graph nodes
-    fn dispatch(&mut self, _thread: usize, _vectors: &mut Dispatch);
+    fn dispatch<'d>(&mut self, _thread: usize, _vectors: &mut Dispatch<'d, 'p>);
     /// This API is called when a node gets a message from control plane, like for example
     /// to modify the nodes forwarding tables etc..
     fn control_msg(&mut self, _thread: usize, _message: T) {}
@@ -31,23 +33,24 @@ pub trait Gclient<T>: Send {
 
 /// This structure provides methods to get packets queued up for a node, and for
 /// the node to queue up packets to other nodes
-pub struct Dispatch<'d> {
+pub struct Dispatch<'d, 'p> {
     node: usize,
-    vectors: &'d mut Vec<VecDeque<BoxPkt>>,
+    pub pool: &'d mut dyn PacketPool<'p>,
+    vectors: &'d mut Vec<VecDeque<BoxPkt<'p>>>,
     counters: &'d mut Vec<GnodeCntrs>,
     nodes: &'d Vec<usize>,
     work: bool,
     wakeup: usize,
 }
 
-impl<'d> Dispatch<'d> {
+impl<'d, 'p> Dispatch<'d, 'p> {
     /// Get one of the packets queued up for a node
-    pub fn pop(&mut self) -> Option<BoxPkt> {
+    pub fn pop(&mut self) -> Option<BoxPkt<'p>> {
         self.vectors[self.node].pop_front()
     }
 
     /// Queue one packet to another node
-    pub fn push(&mut self, node: usize, pkt: BoxPkt) -> bool {
+    pub fn push(&mut self, node: usize, pkt: BoxPkt<'p>) -> bool {
         let node = self.nodes[node];
         if self.vectors[node].capacity() >= 1 {
             self.vectors[node].push_back(pkt);
@@ -114,9 +117,9 @@ impl GnodeCntrs {
 
 // The Gnode structure holds the exact node feature/client object and some metadata
 // associated with the client
-struct Gnode<T> {
+struct Gnode<'p, T> {
     // The feature/client object
-    client: Box<dyn Gclient<T>>,
+    client: Box<dyn Gclient<'p, T> + 'p>,
     // Name of the feature/client
     name: String,
     // Names of all the nodes this node will have edges to (ie will send packets to)
@@ -125,8 +128,8 @@ struct Gnode<T> {
     next_nodes: Vec<usize>,
 }
 
-impl<T> Gnode<T> {
-    fn new(client: Box<dyn Gclient<T>>, name: &str, next_names: Vec<String>) -> Gnode<T> {
+impl<'p, T: 'p> Gnode<'p, T> {
+    fn new(client: Box<dyn Gclient<'p, T>>, name: &str, next_names: Vec<String>) -> Self {
         Gnode {
             client,
             name: name.to_string(),
@@ -135,7 +138,7 @@ impl<T> Gnode<T> {
         }
     }
 
-    fn clone(&self, counters: &mut Counters, log: Arc<Logger>) -> Gnode<T> {
+    fn clone(&self, counters: &mut Counters, log: Arc<Logger>) -> Self {
         Gnode {
             client: self.client.clone(counters, log),
             name: self.name.clone(),
@@ -147,30 +150,41 @@ impl<T> Gnode<T> {
 
 // The Graph object, basically a collection of graph nodes and edges from node to node
 // Usually there is one Graph per thread, the graphs in each thread are copies of each other
-pub struct Graph<T> {
+pub struct Graph<'p, T: 'p> {
     // The thread this graph belongs to
     thread: usize,
     // The graph nodes
-    nodes: Vec<Gnode<T>>,
+    nodes: Vec<Gnode<'p, T>>,
     // A per node packet queue, to hold packets from other nodes to this node
-    vectors: Vec<VecDeque<BoxPkt>>,
+    vectors: Vec<VecDeque<BoxPkt<'p>>>,
     // Generic enq/deq/drop counters per node
     counters: Vec<GnodeCntrs>,
     // Each graph node has an index which is an offset into the nodes Vec in this structure.
     // This hashmap provides a mapping from a graph node name to its index
     indices: HashMap<String, usize>,
+    // Packet/Particle pool
+    pool: Box<dyn PacketPool<'p>>,
+    // Freed packets are queued here
+    queue: Arc<ArrayQueue<BoxPkt<'p>>>,
 }
 
-impl<T> Graph<T> {
+impl<'p, T> Graph<'p, T> {
     /// A new graph is created with just one node in it, a Drop Node that just drops any packet
     /// it receives.
-    pub fn new(thread: usize, counters: &mut Counters) -> Graph<T> {
+    pub fn new(
+        thread: usize,
+        pool: Box<dyn PacketPool<'p>>,
+        queue: Arc<ArrayQueue<BoxPkt<'p>>>,
+        counters: &mut Counters,
+    ) -> Self {
         let mut g = Graph {
             thread,
             nodes: Vec::with_capacity(GRAPH_INIT_SZ),
             vectors: Vec::with_capacity(GRAPH_INIT_SZ),
             counters: Vec::with_capacity(GRAPH_INIT_SZ),
             indices: HashMap::with_capacity(GRAPH_INIT_SZ),
+            pool,
+            queue,
         };
         let init = GnodeInit {
             name: names::DROP.to_string(),
@@ -184,7 +198,14 @@ impl<T> Graph<T> {
 
     /// Clone the entire graph. That relies on each graph node feature/client providing
     /// an ability to clone() itself
-    pub fn clone(&self, thread: usize, counters: &mut Counters, log: Arc<Logger>) -> Graph<T> {
+    pub fn clone(
+        &self,
+        thread: usize,
+        pool: Box<dyn PacketPool<'p>>,
+        queue: Arc<ArrayQueue<BoxPkt<'p>>>,
+        counters: &mut Counters,
+        log: Arc<Logger>,
+    ) -> Self {
         let mut nodes = Vec::with_capacity(GRAPH_INIT_SZ);
         let mut vectors = Vec::with_capacity(GRAPH_INIT_SZ);
         let mut cntrs = Vec::with_capacity(GRAPH_INIT_SZ);
@@ -199,11 +220,13 @@ impl<T> Graph<T> {
             vectors,
             counters: cntrs,
             indices: self.indices.clone(),
+            pool,
+            queue,
         }
     }
 
     /// Add a new feature/client node to the graph.
-    pub fn add(&mut self, client: Box<dyn Gclient<T>>, init: GnodeInit) {
+    pub fn add(&mut self, client: Box<dyn Gclient<'p, T>>, init: GnodeInit) {
         let index = self.index(&init.name);
         if index != 0 {
             return; // Gclient already registered
@@ -248,6 +271,10 @@ impl<T> Graph<T> {
     // iteration, and return values which say if more work is pending and at what time
     // the work has to be done
     pub fn run(&mut self) -> (bool, usize) {
+        // First return all the free packets back to the pool
+        while let Ok(p) = self.queue.pop() {
+            self.pool.free(p);
+        }
         let mut nsecs = std::usize::MAX;
         let mut work = false;
         for n in 0..self.nodes.len() {
@@ -255,6 +282,7 @@ impl<T> Graph<T> {
             let client = &mut node.client;
             let mut d = Dispatch {
                 node: n,
+                pool: &mut *self.pool,
                 vectors: &mut self.vectors,
                 counters: &mut self.counters,
                 nodes: &node.next_nodes,
@@ -288,8 +316,8 @@ struct DropNode {
     count: Counter,
 }
 
-impl<T> Gclient<T> for DropNode {
-    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<T>> {
+impl<'p, T: 'p> Gclient<'p, T> for DropNode {
+    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, T>> {
         let count = Counter::new(counters, names::DROP, CounterType::Pkts, "count");
         Box::new(DropNode { count })
     }

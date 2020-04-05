@@ -53,8 +53,8 @@ impl IPv4Parse {
     }
 }
 
-impl<T> Gclient<T> for IPv4Parse {
-    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<T>> {
+impl<'p, T: 'p> Gclient<'p, T> for IPv4Parse {
+    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, T>> {
         let bad_pkt = Counter::new(counters, &self.name(), CounterType::Error, "bad_pkt");
         Box::new(IPv4Parse { bad_pkt })
     }

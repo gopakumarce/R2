@@ -2,7 +2,7 @@ use super::ipv4::add_route;
 use super::*;
 use fwd::EthMacAddMsg;
 use fwd::EthMacRaw;
-use packet::{PacketPool, PktsHeap};
+use packet::{BoxPkt, PacketPool, PktsHeap};
 use socket::RawSock;
 use std::net::Ipv4Addr;
 use std::process::Command;
@@ -27,9 +27,19 @@ const MAC_OUTPUT: &str = "aa:bb:ca:fe:ba:be";
 const NUM_PKTS: usize = 10;
 const NUM_PART: usize = 20;
 
-fn packet_pool(test: &str) -> Arc<PktsHeap> {
+fn packet_pool<'p>(test: &str) -> (Box<dyn PacketPool<'p> + 'p>, Arc<ArrayQueue<BoxPkt<'p>>>) {
+    let q = Arc::new(ArrayQueue::<BoxPkt>::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
-    PktsHeap::new(&mut counters, NUM_PKTS, NUM_PART, DEF_PARTICLE_SZ)
+    (
+        Box::new(PktsHeap::new(
+            q.clone(),
+            &mut counters,
+            NUM_PKTS,
+            NUM_PART,
+            DEF_PARTICLE_SZ,
+        )),
+        q,
+    )
 }
 
 fn delete_veth() {
@@ -178,13 +188,16 @@ fn packet_send(done: Arc<AtomicUsize>) -> std::thread::JoinHandle<()> {
                 Ok(sock) => sock,
                 Err(errno) => panic!("Cant open packet socket, errno {}", errno),
             };
-            let pool = packet_pool("main_pkt_send");
+            let (mut pool, queue) = packet_pool("main_pkt_send");
             while done.load(Ordering::Relaxed) == 0 {
                 let mut pkt = pool.pkt(0).unwrap();
-                assert!(pkt.append(&ETH_HDR_IPV4));
+                assert!(pkt.append(&mut *pool, &ETH_HDR_IPV4));
                 let data: Vec<u8> = vec![0; DATA_LEN - 14];
-                assert!(pkt.append(&data));
+                assert!(pkt.append(&mut *pool, &data));
                 assert_eq!(raw.sendmsg(&pkt), DATA_LEN);
+                while let Ok(p) = queue.pop() {
+                    pool.free(p);
+                }
             }
         })
         .unwrap()
@@ -198,7 +211,7 @@ fn packet_rcv(done: Arc<AtomicUsize>) -> std::thread::JoinHandle<()> {
                 Ok(sock) => sock,
                 Err(errno) => panic!("Cant open packet socket, errno {}", errno),
             };
-            let pool = packet_pool("main_pkt_recv");
+            let (mut pool, queue) = packet_pool("main_pkt_recv");
             let mut rcv = 0;
             while rcv < 10 {
                 let mut pkt = pool.pkt(0).unwrap();
@@ -206,6 +219,9 @@ fn packet_rcv(done: Arc<AtomicUsize>) -> std::thread::JoinHandle<()> {
                 if pkt.len() != 0 {
                     assert_eq!(pkt.len(), DATA_LEN);
                     rcv += 1;
+                }
+                while let Ok(p) = queue.pop() {
+                    pool.free(p);
                 }
             }
             done.fetch_add(1, Ordering::Relaxed);
@@ -244,7 +260,7 @@ fn create_interfaces(r2: &mut R2) {
     r2.broadcast(R2Msg::EthMacAdd(mac_add));
 }
 
-fn launch_test_threads(r2: &mut R2, done: Arc<AtomicUsize>, mut g: Graph<R2Msg>) {
+fn launch_test_threads(r2: &mut R2<'static>, done: Arc<AtomicUsize>, mut g: Graph<'static, R2Msg>) {
     let (sender, receiver) = channel();
     r2.threads[0].ctrl2fwd = Some(sender);
     let efd = r2.threads[0].efd.clone();
@@ -277,7 +293,8 @@ fn integ_test() {
         1,
     )));
     let mut r2 = r2_rc.lock().unwrap();
-    let mut graph = Graph::<R2Msg>::new(0, &mut r2.counters);
+    let (pool, queue) = packet_pool("main_graph");
+    let mut graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
     create_nodes(&mut r2, &mut graph);
     let done = Arc::new(AtomicUsize::new(0));
     launch_test_threads(&mut r2, done.clone(), graph);

@@ -1,4 +1,5 @@
 use super::*;
+use crossbeam_queue::ArrayQueue;
 use log::log;
 use packet::{PacketPool, PktsHeap};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -9,18 +10,28 @@ const NUM_PKTS: usize = 10;
 const NUM_PART: usize = 20;
 const PARTICLE_SZ: usize = 256;
 
-fn packet_pool(test: &str) -> Arc<PktsHeap> {
+fn packet_pool<'p>(test: &str) -> (Box<dyn PacketPool<'p> + 'p>, Arc<ArrayQueue<BoxPkt<'p>>>) {
+    let q = Arc::new(ArrayQueue::<BoxPkt>::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
-    PktsHeap::new(&mut counters, NUM_PKTS, NUM_PART, PARTICLE_SZ)
+    (
+        Box::new(PktsHeap::new(
+            q.clone(),
+            &mut counters,
+            NUM_PKTS,
+            NUM_PART,
+            PARTICLE_SZ,
+        )),
+        q,
+    )
 }
 
 // Just add a sequence number as the data in the packet
-fn new_pkt(pool: &PktsHeap, count: usize) -> BoxPkt {
+fn new_pkt<'p>(pool: &mut dyn PacketPool<'p>, count: usize) -> BoxPkt<'p> {
     let cnt = count as u32;
     let mut pkt = pool.pkt(0).unwrap();
     let c = cnt.to_be_bytes();
     let v = c.to_vec();
-    assert!(pkt.append(&v));
+    assert!(pkt.append(pool, &v));
     pkt
 }
 
@@ -61,16 +72,14 @@ struct RxNode {
     thread_mask: u64,
     count: usize,
     total_count: Arc<AtomicUsize>,
-    pool: Arc<PktsHeap>,
 }
 
 impl RxNode {
-    fn new(pool: Arc<PktsHeap>, thread_mask: u64) -> RxNode {
+    fn new(thread_mask: u64) -> RxNode {
         RxNode {
             thread_mask,
             count: 0,
             total_count: Arc::new(AtomicUsize::new(0)),
-            pool,
         }
     }
 
@@ -91,21 +100,20 @@ impl RxNode {
 
 struct TestMsg {}
 
-impl Gclient<TestMsg> for RxNode {
-    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<TestMsg>> {
+impl<'p> Gclient<'p, TestMsg> for RxNode {
+    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, TestMsg>> {
         Box::new(RxNode {
             thread_mask: self.thread_mask,
             count: 0,
             total_count: self.total_count.clone(),
-            pool: self.pool.clone(),
         })
     }
 
-    fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
+    fn dispatch<'d>(&mut self, thread: usize, vectors: &mut Dispatch<'d, 'p>) {
         if self.thread_mask & (1 << thread) == 0 {
             return;
         }
-        let pkt = new_pkt(&self.pool, self.count);
+        let pkt = new_pkt(vectors.pool, self.count);
         vectors.push(Next::PRINT as usize, pkt);
         self.count += 1;
         self.total_count.fetch_add(1, Ordering::Relaxed);
@@ -140,8 +148,8 @@ impl TxNode {
     }
 }
 
-impl Gclient<TestMsg> for TxNode {
-    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<TestMsg>> {
+impl<'p> Gclient<'p, TestMsg> for TxNode {
+    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, TestMsg>> {
         Box::new(TxNode {
             count: 0,
             total_count: self.total_count.clone(),
@@ -185,8 +193,8 @@ impl PrintNode {
     }
 }
 
-impl Gclient<TestMsg> for PrintNode {
-    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<TestMsg>> {
+impl<'p> Gclient<'p, TestMsg> for PrintNode {
+    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, TestMsg>> {
         Box::new(PrintNode {
             count: 0,
             total_count: self.total_count.clone(),
@@ -213,9 +221,9 @@ fn single_thread() {
         Err(errno) => panic!("Unable to create counters, errno {}", errno),
     };
     let log = Arc::new(Logger::new("r2_logs", 32, 1000).unwrap());
-    let mut graph = Graph::new(0, &mut counters);
-    let pool = packet_pool("single_thread");
-    let rx = Box::new(RxNode::new(pool, 1 << 0));
+    let (pool, queue) = packet_pool("single_thread");
+    let mut graph = Graph::new(0, pool, queue, &mut counters);
+    let rx = Box::new(RxNode::new(1 << 0));
     let tx = Box::new(TxNode::new());
     let print = Box::new(PrintNode::new());
 
@@ -265,16 +273,16 @@ fn multi_thread() {
         Ok(c) => c,
         Err(errno) => panic!("Unable to create counters, errno {}", errno),
     };
+    let (pool, queue) = packet_pool("multi_thread0");
     let log = Arc::new(Logger::new("r2_logs", 32, 1000).unwrap());
-    let mut graph = Graph::new(0, &mut counters);
+    let mut graph = Graph::new(0, pool, queue, &mut counters);
     let tx = Box::new(TxNode::new());
     let print = Box::new(PrintNode::new());
 
-    let pool = packet_pool("multi_thread");
     let test_threads = 8;
     let mut rx_vec = Vec::new();
     for i in 1..=test_threads {
-        let rx = Box::new(RxNode::new(pool.clone(), 1 << i));
+        let rx = Box::new(RxNode::new(1 << i));
         let init = GnodeInit {
             name: rx.name(),
             next_names: rx.next_names(0),
@@ -302,7 +310,9 @@ fn multi_thread() {
 
     let mut handlers = Vec::new();
     for i in 1..=test_threads {
-        let mut g = graph.clone(i, &mut counters, log.clone());
+        let pool_name = format!("multi_thread{}", i);
+        let (pool, queue) = packet_pool(&pool_name);
+        let mut g = graph.clone(i, pool, queue, &mut counters, log.clone());
         let name = format!("r2{}", i);
         let handler = thread::Builder::new().name(name).spawn(move || {
             let test_count = 10;

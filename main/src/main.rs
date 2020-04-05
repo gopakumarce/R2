@@ -3,13 +3,13 @@ use apis_interface::InterfaceSyncProcessor;
 use apis_log::LogSyncProcessor;
 use apis_route::RouteSyncProcessor;
 use counters::Counters;
+use crossbeam_queue::ArrayQueue;
 use efd::Efd;
 use epoll::{Epoll, EpollClient, EPOLLIN};
 use graph::{GnodeCntrs, GnodeInit, Graph};
 use l2_eth_encap::EncapMux;
 use log::Logger;
 use msg::R2Msg;
-
 use names::rx_tx;
 use packet::PktsHeap;
 use std::collections::HashMap;
@@ -31,7 +31,7 @@ const THREADS: usize = 2;
 const LOGSZ: usize = 32;
 const LOGLINES: usize = 1000;
 const MAX_FDS: i32 = 4000;
-const DEF_PKTS: usize = 4096;
+const DEF_PKTS: usize = 512;
 const DEF_PARTS: usize = 2 * DEF_PKTS;
 const DEF_PARTICLE_SZ: usize = 2048;
 pub const MAX_HEADROOM: usize = 100;
@@ -40,30 +40,28 @@ pub const MAX_HEADROOM: usize = 100;
 // routing context etc.. This is shared across all control threads, but NOT shared
 // to forwarding threads. So if control thread wants to modify the context it will
 // take a lock and modify this
-pub struct R2 {
+pub struct R2<'p> {
     counters: Counters,
-    pkt_pool: Arc<PktsHeap>,
-    fwd2ctrl: Sender<R2Msg>,
+    fwd2ctrl: Sender<R2Msg<'p>>,
     nthreads: usize,
-    threads: Vec<R2PerThread>,
+    threads: Vec<R2PerThread<'p>>,
     ifd: IfdCtx,
     ipv4: IPv4Ctx,
 }
 
-impl R2 {
+impl<'p> R2<'p> {
     fn new(
         counter_name: &str,
         log_name: &str,
         log_data: usize,
         log_size: usize,
-        fwd2ctrl: Sender<R2Msg>,
+        fwd2ctrl: Sender<R2Msg<'p>>,
         nthreads: usize,
-    ) -> R2 {
-        let mut counters = match Counters::new(counter_name) {
+    ) -> Self {
+        let counters = match Counters::new(counter_name) {
             Ok(c) => c,
             Err(errno) => panic!("Unable to create counters, errno {}", errno),
         };
-        let pkt_pool = PktsHeap::new(&mut counters, DEF_PKTS, DEF_PARTS, DEF_PARTICLE_SZ);
 
         let mut threads = Vec::new();
         for t in 0..nthreads {
@@ -84,7 +82,6 @@ impl R2 {
 
         R2 {
             counters,
-            pkt_pool,
             fwd2ctrl,
             nthreads,
             threads,
@@ -97,7 +94,7 @@ impl R2 {
     // to just one forwarding thread although its no big deal to do that - but the goal is
     // to try and avoid that as much as possible and not have 'thread awareness' sprinkled
     // all throughout the code
-    fn broadcast(&mut self, msg: R2Msg) {
+    fn broadcast(&mut self, msg: R2Msg<'p>) {
         for t in self.threads.iter() {
             if let Some(s) = &t.ctrl2fwd {
                 s.send(msg.clone(&mut self.counters, t.logger.clone()))
@@ -109,9 +106,9 @@ impl R2 {
 }
 
 // R2 context information that is unique per forwarding thread
-struct R2PerThread {
+struct R2PerThread<'p> {
     thread: usize,
-    ctrl2fwd: Option<Sender<R2Msg>>,
+    ctrl2fwd: Option<Sender<R2Msg<'p>>>,
     efd: Arc<Efd>,
     poll_fds: Vec<i32>,
     logger: Arc<Logger>,
@@ -136,7 +133,7 @@ fn create_ethernet_mux(r2: &mut R2, g: &mut Graph<R2Msg>) {
 // Create all the graph nodes that can be created upfront - ie those that are not
 // 'dynamic' in nature. Really the only 'dynamic' nodes should be the interfaces,
 // all other feature nodes should get created here.
-fn create_nodes(r2: &mut R2, g: &mut Graph<R2Msg>) {
+fn create_nodes(r2: &mut R2<'static>, g: &mut Graph<'static, R2Msg>) {
     create_ipv4_nodes(r2, g);
     create_ethernet_mux(r2, g);
     g.finalize();
@@ -147,7 +144,7 @@ fn create_nodes(r2: &mut R2, g: &mut Graph<R2Msg>) {
 // will provide a 'XYZSyncProcessor' object which needs as input another object
 // that has the XYZSyncHandler trait implmented -  the XYZSyncHandler trait will
 // implement all the APIs that XYZ module wants to expose (defined in thrift files)
-fn register_apis(r2: Arc<Mutex<R2>>) -> ApiSvr {
+fn register_apis(r2: Arc<Mutex<R2<'static>>>) -> ApiSvr {
     let mut svr = ApiSvr::new(common::API_SVR);
 
     let intf_apis = InterfaceApis::new(r2.clone());
@@ -174,7 +171,7 @@ fn register_apis(r2: Arc<Mutex<R2>>) -> ApiSvr {
 // when control thread wants to send a message to this forwarding thread.
 // NOTE: The model here is an epoll driven wakeup model - but once we have tight polling
 // drivers lke DPDK integrated, this model will change - maybe epoll wait will be taken out
-fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
+fn create_thread(r2: &mut R2<'static>, mut g: Graph<'static, R2Msg>, thread: usize) {
     // Channel to talk to and from control plane
     let (sender, receiver) = channel();
     // This is the descriptor used to wakeup the thread in genenarl, ie unlreated to any
@@ -188,6 +185,7 @@ fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
     for fd in r2.threads[thread].poll_fds.iter() {
         epoll.add(*fd, EPOLLIN);
     }
+
     let name = format!("r2-{}", thread);
     thread::Builder::new()
         .name(name)
@@ -210,9 +208,23 @@ fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
         .unwrap();
 }
 
-fn launch_threads(r2: &mut R2, graph: Graph<R2Msg>) {
+fn launch_threads(r2: &mut R2<'static>, graph: Graph<'static, R2Msg>) {
     for t in 1..r2.nthreads {
-        let g = graph.clone(t, &mut r2.counters, r2.threads[t].logger.clone());
+        let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
+        let pool = Box::new(PktsHeap::new(
+            queue.clone(),
+            &mut r2.counters,
+            DEF_PKTS,
+            DEF_PARTS,
+            DEF_PARTICLE_SZ,
+        ));
+        let g = graph.clone(
+            t,
+            pool,
+            queue,
+            &mut r2.counters,
+            r2.threads[t].logger.clone(),
+        );
         create_thread(r2, g, t);
     }
     create_thread(r2, graph, 0);
@@ -239,7 +251,15 @@ fn main() {
         THREADS,
     )));
     let mut r2 = r2_rc.lock().unwrap();
-    let mut graph = Graph::<R2Msg>::new(0, &mut r2.counters);
+    let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
+    let pool = Box::new(PktsHeap::new(
+        queue.clone(),
+        &mut r2.counters,
+        DEF_PKTS,
+        DEF_PARTS,
+        DEF_PARTICLE_SZ,
+    ));
+    let mut graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
     create_nodes(&mut r2, &mut graph);
     launch_threads(&mut r2, graph);
 

@@ -5,22 +5,20 @@ use packet::{BoxPart, BoxPkt, PacketPool};
 // done the PktsHeap usage in main.rs can be replaced with R2PktPool
 struct R2PktPool {}
 
-impl PacketPool for R2PktPool {
-    fn pkt(&self, _headroom: usize) -> Option<BoxPkt> {
+impl<'p> PacketPool<'p> for R2PktPool {
+    fn pkt(&mut self, _headroom: usize) -> Option<BoxPkt<'p>> {
         None
     }
 
-    fn particle(&self, _headroom: usize) -> Option<BoxPart> {
+    fn particle(&mut self, _headroom: usize) -> Option<BoxPart<'p>> {
         None
     }
 
-    fn free_pkt(&self, _pkt: &BoxPkt) {}
+    fn free_pkt(&mut self, _pkt: BoxPkt<'p>) {}
 
-    fn free_part(&self, _part: &BoxPart) {}
+    fn free_part(&mut self, _part: BoxPart<'p>) {}
 
     fn particle_sz(&self) -> usize {
         0
     }
-
-    fn free(&self) {}
 }

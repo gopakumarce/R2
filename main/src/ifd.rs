@@ -13,11 +13,11 @@ use msg::{ClassAddMsg, GnodeAddMsg};
 use msg::{Curves, Sc};
 use std::net::Ipv4Addr;
 
-pub struct InterfaceApis {
-    r2: Arc<Mutex<R2>>,
+pub struct InterfaceApis<'p> {
+    r2: Arc<Mutex<R2<'p>>>,
 }
 
-impl InterfaceApis {
+impl<'p> InterfaceApis<'p> {
     pub fn new(r2: Arc<Mutex<R2>>) -> InterfaceApis {
         InterfaceApis { r2 }
     }
@@ -107,12 +107,7 @@ fn unwrap_curves(curves: &CurvesApi) -> Curves {
 }
 
 fn create_eth_nodes(r2: &mut R2, intf: Arc<Interface>) {
-    let decap = EthDecap::new(
-        intf.clone(),
-        r2.pkt_pool.clone(),
-        &mut r2.counters,
-        r2.fwd2ctrl.clone(),
-    );
+    let decap = EthDecap::new(intf.clone(), &mut r2.counters, r2.fwd2ctrl.clone());
     let init = GnodeInit {
         name: decap.name(),
         next_names: decap.next_names(),
@@ -125,7 +120,7 @@ fn create_eth_nodes(r2: &mut R2, intf: Arc<Interface>) {
     let msg = R2Msg::GnodeAdd(msg);
     r2.broadcast(msg);
 
-    let encap = EthEncap::new(intf, r2.pkt_pool.clone(), &mut r2.counters);
+    let encap = EthEncap::new(intf, &mut r2.counters);
     let init = GnodeInit {
         name: encap.name(),
         next_names: encap.next_names(),
@@ -151,13 +146,7 @@ pub fn create_interface_node(
     r2.ifd.last_thread = (thread + 1) % r2.nthreads;
     let thread_mask = 1 << thread;
     let efd = r2.threads[thread].efd.clone();
-    let intf = match IfNode::new(
-        &mut r2.counters,
-        thread_mask,
-        efd,
-        interface.clone(),
-        r2.pkt_pool.clone(),
-    ) {
+    let intf = match IfNode::new(&mut r2.counters, thread_mask, efd, interface.clone()) {
         Ok(intf) => intf,
         Err(errno) => return Err(-errno),
     };
@@ -194,7 +183,7 @@ pub fn create_interface_node(
     Ok(())
 }
 
-impl InterfaceSyncHandler for InterfaceApis {
+impl<'p> InterfaceSyncHandler for InterfaceApis<'p> {
     fn handle_add_if(&self, name: String, ifindex: i32, mac: String) -> thrift::Result<()> {
         let l2_addr;
         if let Some(mac) = fwd::str_to_mac(&mac) {
