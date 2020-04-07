@@ -44,8 +44,8 @@ impl EncapMux {
     }
 }
 
-impl<'p, T: 'p> Gclient<'p, T> for EncapMux {
-    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, T>> {
+impl<T> Gclient<T> for EncapMux {
+    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<T>> {
         Box::new(EncapMux {
             next_names: self.next_names.clone(),
         })
@@ -115,11 +115,7 @@ impl EthEncap {
         v
     }
 
-    fn do_arp_request<'p>(
-        &self,
-        pool: &mut dyn PacketPool<'p>,
-        in_pkt: &BoxPkt<'p>,
-    ) -> Option<BoxPkt<'p>> {
+    fn do_arp_request(&self, pool: &mut dyn PacketPool, in_pkt: &BoxPkt) -> Option<BoxPkt> {
         let pkt = pool.pkt(0 /* no headroom */);
         pkt.as_ref()?;
         let mut pkt = pkt.unwrap();
@@ -186,12 +182,7 @@ impl EthEncap {
         }
     }
 
-    fn add_eth_hdr<'p>(
-        &self,
-        pool: &mut dyn PacketPool<'p>,
-        pkt: &mut BoxPkt<'p>,
-        mac: &EthMacRaw,
-    ) -> bool {
+    fn add_eth_hdr(&self, pool: &mut dyn PacketPool, pkt: &mut BoxPkt, mac: &EthMacRaw) -> bool {
         if !pkt.prepend(pool, &ETH_TYPE_IPV4.to_be_bytes()) {
             return false;
         }
@@ -206,8 +197,8 @@ impl EthEncap {
     }
 }
 
-impl<'p> Gclient<'p, R2Msg<'p>> for EthEncap {
-    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, R2Msg<'p>>> {
+impl Gclient<R2Msg> for EthEncap {
+    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<R2Msg>> {
         let bad_mac = Counter::new(counters, &self.name(), CounterType::Error, "bad_mac");
         Box::new(EthEncap {
             intf: self.intf.clone(),
@@ -216,7 +207,7 @@ impl<'p> Gclient<'p, R2Msg<'p>> for EthEncap {
         })
     }
 
-    fn dispatch<'d>(&mut self, _thread: usize, vectors: &mut Dispatch<'d, 'p>) {
+    fn dispatch(&mut self, _thread: usize, vectors: &mut Dispatch) {
         while let Some(mut p) = vectors.pop() {
             let mac = self.mac.get(&p.out_l3addr);
             if let Some(mac) = mac {

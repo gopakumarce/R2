@@ -13,11 +13,11 @@ use msg::{ClassAddMsg, GnodeAddMsg};
 use msg::{Curves, Sc};
 use std::net::Ipv4Addr;
 
-pub struct InterfaceApis<'p> {
-    r2: Arc<Mutex<R2<'p>>>,
+pub struct InterfaceApis {
+    r2: Arc<Mutex<R2>>,
 }
 
-impl<'p> InterfaceApis<'p> {
+impl InterfaceApis {
     pub fn new(r2: Arc<Mutex<R2>>) -> InterfaceApis {
         InterfaceApis { r2 }
     }
@@ -183,7 +183,7 @@ pub fn create_interface_node(
     Ok(())
 }
 
-impl<'p> InterfaceSyncHandler for InterfaceApis<'p> {
+impl InterfaceSyncHandler for InterfaceApis {
     fn handle_add_if(&self, name: String, ifindex: i32, mac: String) -> thrift::Result<()> {
         let l2_addr;
         if let Some(mac) = fwd::str_to_mac(&mac) {

@@ -33,19 +33,19 @@ fn next_name(ifindex: usize, next: Next) -> String {
 // get extended to have more options like DPDK etc.. The IfNode for an interface is
 // present in all forwarding threads, although only one thread is the 'owner' of the
 // interface. All other threads handoff packets to the 'owner' vis MPSC 'thread_q'
-pub struct IfNode<'p> {
+pub struct IfNode {
     name: String,
     thread_mask: u64,
     intf: Arc<Interface>,
-    sched: Hfsc<'p>,
+    sched: Hfsc,
     driver: Arc<RawSock>,
     sched_fail: Counter,
     threadq_fail: Counter,
-    thread_q: Arc<ArrayQueue<BoxPkt<'p>>>,
+    thread_q: Arc<ArrayQueue<BoxPkt>>,
     thread_wakeup: Arc<Efd>,
 }
 
-impl<'p> IfNode<'p> {
+impl IfNode {
     // thread_mask: specifies which thread owns the IfNode, we expect only one bit set in the mask
     // efd: event fd (efd) used to wakeup the owner thread when handing off packets on thread_q
     // intf: The common driver-agnostic parameters of an interface like ip address/mtu etc..
@@ -97,12 +97,8 @@ impl<'p> IfNode<'p> {
     }
 }
 
-impl<'p> Gclient<'p, R2Msg<'p>> for IfNode<'p> {
-    fn clone(
-        &self,
-        counters: &mut Counters,
-        _log: Arc<Logger>,
-    ) -> Box<dyn Gclient<'p, R2Msg<'p>> + 'p> {
+impl Gclient<R2Msg> for IfNode {
+    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<R2Msg>> {
         // Only the 'owner' IfNode really needs/uses a scheduler, so in all other nodes, the
         // sched doesnt really do anything, they handoff packets to the owner IfNode.
         let sched = sched::hfsc::Hfsc::new(common::MB!(10 * 1024));
@@ -121,7 +117,7 @@ impl<'p> Gclient<'p, R2Msg<'p>> for IfNode<'p> {
         })
     }
 
-    fn dispatch<'d>(&mut self, thread: usize, vectors: &mut Dispatch<'d, 'p>) {
+    fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
         let owner_thread = (self.thread_mask & (1 << thread)) != 0;
         // Do packet Tx if we are the owner thread (thread the driver/device is pinnned to).
         // If so send the packet out on the driver, otherwise enqueue the packet to the MPSC

@@ -5,8 +5,8 @@ use names::l2_eth_encap;
 pub fn ctrl2fwd_messages(
     thread: usize,
     epoll: &mut Epoll,
-    receiver: &Receiver<R2Msg<'static>>,
-    g: &mut Graph<'static, R2Msg<'static>>,
+    receiver: &Receiver<R2Msg>,
+    g: &mut Graph<R2Msg>,
 ) {
     while let Ok(msg) = receiver.try_recv() {
         match msg {

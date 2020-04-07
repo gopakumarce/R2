@@ -10,7 +10,7 @@ const NUM_PKTS: usize = 10;
 const NUM_PART: usize = 20;
 const PARTICLE_SZ: usize = 256;
 
-fn packet_pool<'p>(test: &str) -> (Box<dyn PacketPool<'p> + 'p>, Arc<ArrayQueue<BoxPkt<'p>>>) {
+fn packet_pool(test: &str) -> (Box<dyn PacketPool>, Arc<ArrayQueue<BoxPkt>>) {
     let q = Arc::new(ArrayQueue::<BoxPkt>::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
     (
@@ -26,7 +26,7 @@ fn packet_pool<'p>(test: &str) -> (Box<dyn PacketPool<'p> + 'p>, Arc<ArrayQueue<
 }
 
 // Just add a sequence number as the data in the packet
-fn new_pkt<'p>(pool: &mut dyn PacketPool<'p>, count: usize) -> BoxPkt<'p> {
+fn new_pkt(pool: &mut dyn PacketPool, count: usize) -> BoxPkt {
     let cnt = count as u32;
     let mut pkt = pool.pkt(0).unwrap();
     let c = cnt.to_be_bytes();
@@ -100,8 +100,8 @@ impl RxNode {
 
 struct TestMsg {}
 
-impl<'p> Gclient<'p, TestMsg> for RxNode {
-    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, TestMsg>> {
+impl Gclient<TestMsg> for RxNode {
+    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<TestMsg>> {
         Box::new(RxNode {
             thread_mask: self.thread_mask,
             count: 0,
@@ -109,7 +109,7 @@ impl<'p> Gclient<'p, TestMsg> for RxNode {
         })
     }
 
-    fn dispatch<'d>(&mut self, thread: usize, vectors: &mut Dispatch<'d, 'p>) {
+    fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
         if self.thread_mask & (1 << thread) == 0 {
             return;
         }
@@ -148,8 +148,8 @@ impl TxNode {
     }
 }
 
-impl<'p> Gclient<'p, TestMsg> for TxNode {
-    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, TestMsg>> {
+impl Gclient<TestMsg> for TxNode {
+    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<TestMsg>> {
         Box::new(TxNode {
             count: 0,
             total_count: self.total_count.clone(),
@@ -193,8 +193,8 @@ impl PrintNode {
     }
 }
 
-impl<'p> Gclient<'p, TestMsg> for PrintNode {
-    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<'p, TestMsg>> {
+impl Gclient<TestMsg> for PrintNode {
+    fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<TestMsg>> {
         Box::new(PrintNode {
             count: 0,
             total_count: self.total_count.clone(),

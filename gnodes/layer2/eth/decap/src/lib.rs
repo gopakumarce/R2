@@ -56,15 +56,15 @@ struct Cnt {
 // plane thread for example for display. The whole mac address learning business will
 // need to be thought of more carefully in time (github issue #4). Also today we just
 // support plain ethernet packets without vlan tags.
-pub struct EthDecap<'p> {
+pub struct EthDecap {
     intf: Arc<Interface>,
     mac: HashMap<Ipv4Addr, EthMacRaw>,
-    sender: Sender<R2Msg<'p>>,
+    sender: Sender<R2Msg>,
     cnt: Cnt,
 }
 
-impl<'p> EthDecap<'p> {
-    pub fn new(intf: Arc<Interface>, counters: &mut Counters, sender: Sender<R2Msg<'p>>) -> Self {
+impl EthDecap {
+    pub fn new(intf: Arc<Interface>, counters: &mut Counters, sender: Sender<R2Msg>) -> Self {
         let unknown_ethtype = Counter::new(
             counters,
             &l2_eth_decap(intf.ifindex),
@@ -124,10 +124,10 @@ impl<'p> EthDecap<'p> {
 
     fn do_arp_reply(
         &self,
-        pool: &mut dyn PacketPool<'p>,
+        pool: &mut dyn PacketPool,
         src_ip: Ipv4Addr,
         src_mac: &[u8],
-    ) -> Option<BoxPkt<'p>> {
+    ) -> Option<BoxPkt> {
         let pkt = pool.pkt(0 /* no headroom */);
         pkt.as_ref()?;
         let mut pkt = pkt.unwrap();
@@ -176,12 +176,7 @@ impl<'p> EthDecap<'p> {
         Some(pkt)
     }
 
-    fn process_arp(
-        &mut self,
-        pool: &mut dyn PacketPool<'p>,
-        mac: &[u8],
-        len: usize,
-    ) -> Option<BoxPkt<'p>> {
+    fn process_arp(&mut self, pool: &mut dyn PacketPool, mac: &[u8], len: usize) -> Option<BoxPkt> {
         let off = EthOffsets::EthOpcodeOff as usize;
         let op = u16::from_be_bytes([mac[off], mac[off + 1]]);
         let off = EthOffsets::EthProtoOff as usize;
@@ -228,10 +223,10 @@ impl<'p> EthDecap<'p> {
 
     fn process_arp_req(
         &mut self,
-        pool: &mut dyn PacketPool<'p>,
+        pool: &mut dyn PacketPool,
         mac: &[u8],
         _len: usize,
-    ) -> Option<BoxPkt<'p>> {
+    ) -> Option<BoxPkt> {
         let off = EthOffsets::EthTargetIpOff as usize;
         let dst_ip = &mac[off..off + 4];
         if self.intf.ipv4_addr.octets() != dst_ip {
@@ -278,12 +273,8 @@ impl<'p> EthDecap<'p> {
     }
 }
 
-impl<'p> Gclient<'p, R2Msg<'p>> for EthDecap<'p> {
-    fn clone(
-        &self,
-        counters: &mut Counters,
-        _log: Arc<Logger>,
-    ) -> Box<dyn Gclient<'p, R2Msg<'p>> + 'p> {
+impl Gclient<R2Msg> for EthDecap {
+    fn clone(&self, counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<R2Msg>> {
         let unknown_ethtype = Counter::new(
             counters,
             &self.name(),
@@ -309,7 +300,7 @@ impl<'p> Gclient<'p, R2Msg<'p>> for EthDecap<'p> {
         })
     }
 
-    fn dispatch<'d>(&mut self, _thread: usize, vectors: &mut Dispatch<'d, 'p>) {
+    fn dispatch(&mut self, _thread: usize, vectors: &mut Dispatch) {
         while let Some(mut p) = vectors.pop() {
             assert_eq!(p.pull_l2(ETHER_HDR_LEN), ETHER_HDR_LEN);
             let (mac, len) = p.get_l2();

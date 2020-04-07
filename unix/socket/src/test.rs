@@ -12,7 +12,7 @@ const NUM_PART: usize = 20;
 const MAX_PACKET: usize = 1500;
 const PARTICLE_SZ: usize = 512;
 
-fn packet_pool<'p>(test: &'p str, part_sz: usize) -> Box<dyn PacketPool<'p> + 'p> {
+fn packet_pool(test: &str, part_sz: usize) -> Box<dyn PacketPool> {
     let q = Arc::new(ArrayQueue::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
     Box::new(PktsHeap::new(q, &mut counters, NUM_PKTS, NUM_PART, part_sz))

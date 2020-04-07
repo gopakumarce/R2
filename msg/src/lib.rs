@@ -6,8 +6,8 @@ use graph::{Gclient, GnodeInit};
 use log::Logger;
 use std::sync::Arc;
 
-pub enum R2Msg<'p> {
-    GnodeAdd(GnodeAddMsg<'p>),
+pub enum R2Msg {
+    GnodeAdd(GnodeAddMsg),
     EpollAdd(EpollAddMsg),
     IPv4TableAdd(IPv4TableMsg),
     ModifyInterface(ModifyInterfaceMsg),
@@ -15,7 +15,7 @@ pub enum R2Msg<'p> {
     ClassAdd(ClassAddMsg),
 }
 
-impl<'p> R2Msg<'p> {
+impl R2Msg {
     pub fn clone(&self, counters: &mut Counters, logger: Arc<Logger>) -> Self {
         match self {
             R2Msg::GnodeAdd(gnode_add) => R2Msg::GnodeAdd(gnode_add.clone(counters, logger)),
@@ -28,12 +28,12 @@ impl<'p> R2Msg<'p> {
     }
 }
 
-pub struct GnodeAddMsg<'p> {
-    pub node: Box<dyn Gclient<'p, R2Msg<'p>> + 'p>,
+pub struct GnodeAddMsg {
+    pub node: Box<dyn Gclient<R2Msg>>,
     pub init: GnodeInit,
 }
 
-impl<'p> GnodeAddMsg<'p> {
+impl GnodeAddMsg {
     pub fn clone(&self, counters: &mut Counters, logger: Arc<Logger>) -> Self {
         GnodeAddMsg {
             node: self.node.clone(counters, logger),

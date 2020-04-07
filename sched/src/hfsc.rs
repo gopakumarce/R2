@@ -219,17 +219,17 @@ fn rtsc_min(rtsc: &mut RuntimeSc, isc: &InternalSc, x: u64, y: u64) {
     rtsc.dy = dy;
 }
 
-pub struct Hfsc<'p> {
+pub struct Hfsc {
     root: usize,
     free_index: VecDeque<usize>,
     eligible: BTreeMap<Key, usize>,
-    classes: Vec<Class<'p>>,
+    classes: Vec<Class>,
     class_names: HashMap<String, usize>,
     get_time_ns: fn() -> u64,
     pkts_queued: usize,
 }
 
-impl<'p> Hfsc<'p> {
+impl Hfsc {
     pub fn new(bandwidth: usize) -> Self {
         let f_sc = Sc {
             m1: 0,
@@ -528,7 +528,7 @@ impl<'p> Hfsc<'p> {
         }
     }
 
-    pub fn enqueue(&mut self, classid: usize, pkt: BoxPkt<'p>) -> bool {
+    pub fn enqueue(&mut self, classid: usize, pkt: BoxPkt) -> bool {
         if classid >= self.classes.len() || !self.classes[classid].in_use {
             return false;
         }
@@ -559,7 +559,7 @@ impl<'p> Hfsc<'p> {
         true
     }
 
-    pub fn dequeue(&mut self) -> Option<BoxPkt<'p>> {
+    pub fn dequeue(&mut self) -> Option<BoxPkt> {
         let time = (self.get_time_ns)();
         let mut ret = None;
 
@@ -624,7 +624,7 @@ impl<'p> Hfsc<'p> {
     }
 }
 
-pub struct Class<'p> {
+pub struct Class {
     in_use: bool,
     leaf: bool,
     parent: usize,
@@ -652,10 +652,10 @@ pub struct Class<'p> {
     u_run: RuntimeSc,
     nactive: usize,
     children: BTreeMap<Key, usize>,
-    packets: VecDeque<BoxPkt<'p>>,
+    packets: VecDeque<BoxPkt>,
 }
 
-impl<'p> Class<'p> {
+impl Class {
     fn new(
         parent: usize,
         index: usize,
@@ -760,7 +760,7 @@ impl<'p> Class<'p> {
     }
 }
 
-impl<'p> Clone for Class<'p> {
+impl Clone for Class {
     fn clone(&self) -> Self {
         Class {
             in_use: self.in_use,

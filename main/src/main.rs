@@ -40,22 +40,22 @@ pub const MAX_HEADROOM: usize = 100;
 // routing context etc.. This is shared across all control threads, but NOT shared
 // to forwarding threads. So if control thread wants to modify the context it will
 // take a lock and modify this
-pub struct R2<'p> {
+pub struct R2 {
     counters: Counters,
-    fwd2ctrl: Sender<R2Msg<'p>>,
+    fwd2ctrl: Sender<R2Msg>,
     nthreads: usize,
-    threads: Vec<R2PerThread<'p>>,
+    threads: Vec<R2PerThread>,
     ifd: IfdCtx,
     ipv4: IPv4Ctx,
 }
 
-impl<'p> R2<'p> {
+impl R2 {
     fn new(
         counter_name: &str,
         log_name: &str,
         log_data: usize,
         log_size: usize,
-        fwd2ctrl: Sender<R2Msg<'p>>,
+        fwd2ctrl: Sender<R2Msg>,
         nthreads: usize,
     ) -> Self {
         let counters = match Counters::new(counter_name) {
@@ -94,7 +94,7 @@ impl<'p> R2<'p> {
     // to just one forwarding thread although its no big deal to do that - but the goal is
     // to try and avoid that as much as possible and not have 'thread awareness' sprinkled
     // all throughout the code
-    fn broadcast(&mut self, msg: R2Msg<'p>) {
+    fn broadcast(&mut self, msg: R2Msg) {
         for t in self.threads.iter() {
             if let Some(s) = &t.ctrl2fwd {
                 s.send(msg.clone(&mut self.counters, t.logger.clone()))
@@ -106,9 +106,9 @@ impl<'p> R2<'p> {
 }
 
 // R2 context information that is unique per forwarding thread
-struct R2PerThread<'p> {
+struct R2PerThread {
     thread: usize,
-    ctrl2fwd: Option<Sender<R2Msg<'p>>>,
+    ctrl2fwd: Option<Sender<R2Msg>>,
     efd: Arc<Efd>,
     poll_fds: Vec<i32>,
     logger: Arc<Logger>,
@@ -133,7 +133,7 @@ fn create_ethernet_mux(r2: &mut R2, g: &mut Graph<R2Msg>) {
 // Create all the graph nodes that can be created upfront - ie those that are not
 // 'dynamic' in nature. Really the only 'dynamic' nodes should be the interfaces,
 // all other feature nodes should get created here.
-fn create_nodes(r2: &mut R2<'static>, g: &mut Graph<'static, R2Msg>) {
+fn create_nodes(r2: &mut R2, g: &mut Graph<R2Msg>) {
     create_ipv4_nodes(r2, g);
     create_ethernet_mux(r2, g);
     g.finalize();
@@ -144,7 +144,7 @@ fn create_nodes(r2: &mut R2<'static>, g: &mut Graph<'static, R2Msg>) {
 // will provide a 'XYZSyncProcessor' object which needs as input another object
 // that has the XYZSyncHandler trait implmented -  the XYZSyncHandler trait will
 // implement all the APIs that XYZ module wants to expose (defined in thrift files)
-fn register_apis(r2: Arc<Mutex<R2<'static>>>) -> ApiSvr {
+fn register_apis(r2: Arc<Mutex<R2>>) -> ApiSvr {
     let mut svr = ApiSvr::new(common::API_SVR);
 
     let intf_apis = InterfaceApis::new(r2.clone());
@@ -171,7 +171,7 @@ fn register_apis(r2: Arc<Mutex<R2<'static>>>) -> ApiSvr {
 // when control thread wants to send a message to this forwarding thread.
 // NOTE: The model here is an epoll driven wakeup model - but once we have tight polling
 // drivers lke DPDK integrated, this model will change - maybe epoll wait will be taken out
-fn create_thread(r2: &mut R2<'static>, mut g: Graph<'static, R2Msg>, thread: usize) {
+fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
     // Channel to talk to and from control plane
     let (sender, receiver) = channel();
     // This is the descriptor used to wakeup the thread in genenarl, ie unlreated to any
@@ -208,7 +208,7 @@ fn create_thread(r2: &mut R2<'static>, mut g: Graph<'static, R2Msg>, thread: usi
         .unwrap();
 }
 
-fn launch_threads(r2: &mut R2<'static>, graph: Graph<'static, R2Msg>) {
+fn launch_threads(r2: &mut R2, graph: Graph<R2Msg>) {
     for t in 1..r2.nthreads {
         let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
         let pool = Box::new(PktsHeap::new(

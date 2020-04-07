@@ -10,11 +10,11 @@ use std::io::prelude::*;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
-pub struct RouteApis<'p> {
-    r2: Arc<Mutex<R2<'p>>>,
+pub struct RouteApis {
+    r2: Arc<Mutex<R2>>,
 }
 
-impl<'p> RouteApis<'p> {
+impl RouteApis {
     pub fn new(r2: Arc<Mutex<R2>>) -> RouteApis {
         RouteApis { r2 }
     }
@@ -108,7 +108,7 @@ impl IPv4Ctx {
     }
 }
 
-pub fn create_ipv4_nodes(r2: &mut R2<'static>, g: &mut Graph<'static, R2Msg>) {
+pub fn create_ipv4_nodes(r2: &mut R2, g: &mut Graph<R2Msg>) {
     let ipv4_parse_node = IPv4Parse::new(&mut r2.counters);
     let init = GnodeInit {
         name: ipv4_parse_node.name(),
@@ -152,7 +152,7 @@ fn route_json_dump(f: &mut File, r2: &R2, prefix: Ipv4Addr, masklen: u32, leaf: 
     }
 }
 
-impl<'p> RouteSyncHandler for RouteApis<'p> {
+impl RouteSyncHandler for RouteApis {
     fn handle_add_route(
         &self,
         ip_mask: String,

@@ -27,7 +27,7 @@ const MAC_OUTPUT: &str = "aa:bb:ca:fe:ba:be";
 const NUM_PKTS: usize = 10;
 const NUM_PART: usize = 20;
 
-fn packet_pool<'p>(test: &str) -> (Box<dyn PacketPool<'p> + 'p>, Arc<ArrayQueue<BoxPkt<'p>>>) {
+fn packet_pool(test: &str) -> (Box<dyn PacketPool>, Arc<ArrayQueue<BoxPkt>>) {
     let q = Arc::new(ArrayQueue::<BoxPkt>::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
     (
@@ -260,7 +260,7 @@ fn create_interfaces(r2: &mut R2) {
     r2.broadcast(R2Msg::EthMacAdd(mac_add));
 }
 
-fn launch_test_threads(r2: &mut R2<'static>, done: Arc<AtomicUsize>, mut g: Graph<'static, R2Msg>) {
+fn launch_test_threads(r2: &mut R2, done: Arc<AtomicUsize>, mut g: Graph<R2Msg>) {
     let (sender, receiver) = channel();
     r2.threads[0].ctrl2fwd = Some(sender);
     let efd = r2.threads[0].efd.clone();
