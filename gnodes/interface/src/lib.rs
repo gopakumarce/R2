@@ -8,7 +8,6 @@ use log::Logger;
 use msg::R2Msg;
 use names::l2_eth_decap;
 use packet::BoxPkt;
-use packet::PacketPool;
 use sched::hfsc::Hfsc;
 use socket::RawSock;
 use std::sync::Arc;
@@ -40,7 +39,6 @@ pub struct IfNode {
     intf: Arc<Interface>,
     sched: Hfsc,
     driver: Arc<RawSock>,
-    pool: Arc<dyn PacketPool>,
     sched_fail: Counter,
     threadq_fail: Counter,
     thread_q: Arc<ArrayQueue<BoxPkt>>,
@@ -51,14 +49,12 @@ impl IfNode {
     // thread_mask: specifies which thread owns the IfNode, we expect only one bit set in the mask
     // efd: event fd (efd) used to wakeup the owner thread when handing off packets on thread_q
     // intf: The common driver-agnostic parameters of an interface like ip address/mtu etc..
-    // pool: packet pool used by the interface to allocate packets/particles
     pub fn new(
         counters: &mut Counters,
         thread_mask: u64,
         efd: Arc<Efd>,
         intf: Arc<Interface>,
-        pool: Arc<dyn PacketPool>,
-    ) -> Result<IfNode, i32> {
+    ) -> Result<Self, i32> {
         let name = names::rx_tx(intf.ifindex);
         match RawSock::new(&intf.ifname, true) {
             Ok(sock) => {
@@ -73,7 +69,6 @@ impl IfNode {
                     intf,
                     sched,
                     driver: Arc::new(sock),
-                    pool,
                     sched_fail,
                     threadq_fail,
                     thread_q: Arc::new(ArrayQueue::new(VEC_SIZE)),
@@ -115,7 +110,6 @@ impl Gclient<R2Msg> for IfNode {
             intf: self.intf.clone(),
             sched,
             driver: self.driver.clone(),
-            pool: self.pool.clone(),
             sched_fail,
             threadq_fail,
             thread_q: self.thread_q.clone(),
@@ -156,7 +150,7 @@ impl Gclient<R2Msg> for IfNode {
         // Do packet Rx, only on the thread this driver is pinned to
         if owner_thread {
             for _ in 0..VEC_SIZE {
-                let pkt = self.pool.pkt(self.intf.headroom);
+                let pkt = vectors.pool.pkt(self.intf.headroom);
                 if pkt.is_none() {
                     break;
                 }

@@ -3,25 +3,23 @@
 # Exit on error
 set -e
 
-# if containers already exist, get their container ID
-C1=$(docker ps -a | grep R2_client1 | awk '{print $1}')
-C2=$(docker ps -a | grep R2_client2 | awk '{print $1}')
+# Remove containers
+rm_containers () {
+    # if containers already exist, get their container ID
+    C1=$(docker ps -a | grep R2_client1 | awk '{print $1}')
+    C2=$(docker ps -a | grep R2_client2 | awk '{print $1}')
 
-# Code to run on error (cleanup and remove containers)
-clean_up () {
-    ARG=$?
     if [[ ! -z $C1 ]]; then
-	    docker stop $C1 || true
-	    docker rm $C1 || true
+        docker stop $C1 || true
+        docker rm $C1 || true
     fi
     if [[ ! -z $C2 ]]; then
-	    docker stop $C2 || true
-	    docker rm $C2 || true
+        docker stop $C2 || true
+        docker rm $C2 || true
     fi
-    exit $ARG
-} 
-# Set the error trap
-trap clean_up EXIT
+}
+
+rm_containers
 
 # Do not run this script as root, we use sudo for priv cmds
 if [[ $EUID == 0 ]]; then
@@ -30,7 +28,7 @@ if [[ $EUID == 0 ]]; then
 fi
 
 # If R2 is already running, kill it, this script will again launch R2 
-pkill r2 || true
+sudo pkill r2 || true
 
 # Create two docker containers using the tiny busybox image 
 docker create -t --name R2_client1 busybox sh 
@@ -69,7 +67,7 @@ sudo nsenter -t $c2_pid -n ip route add default via 2.1.1.2 dev veth_c2_2
 ~/.cargo/bin/cargo build
 
 # Run R2
-./target/debug/r2 &
+sudo ./target/debug/r2 &
 
 # Sometimes the interfaces take a while to come up, so wait for couple
 # of seconds and bring the interfaces up

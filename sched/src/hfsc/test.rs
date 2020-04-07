@@ -1,5 +1,6 @@
 use super::*;
 use counters::Counters;
+use crossbeam_queue::ArrayQueue;
 use packet::{PacketPool, PktsHeap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -11,15 +12,16 @@ const PKT_TIME: u64 = (PKTSZ as u64 * 8 * 1_000_000_000 / (1024 * 1024));
 const NUM_PKTS: usize = 4096;
 const NUM_PART: usize = 2 * 4096;
 
-fn packet_pool(test: &str) -> Arc<PktsHeap> {
+fn packet_pool(test: &str) -> Box<dyn PacketPool> {
+    let q = Arc::new(ArrayQueue::<BoxPkt>::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
-    PktsHeap::new(&mut counters, NUM_PKTS, NUM_PART, PKTSZ)
+    Box::new(PktsHeap::new(q, &mut counters, NUM_PKTS, NUM_PART, PKTSZ))
 }
 
 // Create two classes with bandwidth ratio 1:10
 #[test]
 fn one_level_linkshare() {
-    let pool = packet_pool("hfsc_1lvl_lshare");
+    let mut pool = packet_pool("hfsc_1lvl_lshare");
     let f_sc_10mb = Sc {
         m1: 0,
         d: 0,
@@ -63,11 +65,11 @@ fn one_level_linkshare() {
 
     for _ in 0..512 {
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&DATA));
+        assert!(pkt.append(&mut *pool, &DATA));
         pkt.out_ifindex = class1;
         hfsc.enqueue(class1, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&DATA));
+        assert!(pkt.append(&mut *pool, &DATA));
         pkt.out_ifindex = class2;
         hfsc.enqueue(class2, pkt);
     }
@@ -112,7 +114,7 @@ fn one_level_linkshare() {
 // l1_c2_l2_c1:l1_c2_l2_c2 is ratio 10:1
 #[test]
 fn two_level_linkshare() {
-    let pool = packet_pool("hfsc_2lvl_lshare");
+    let mut pool = packet_pool("hfsc_2lvl_lshare");
     let f_sc_10mb = Sc {
         m1: 0,
         d: 0,
@@ -206,20 +208,20 @@ fn two_level_linkshare() {
 
     for _ in 0..512 {
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&DATA));
+        assert!(pkt.append(&mut *pool, &DATA));
         pkt.out_ifindex = l1_c1_l2_c1;
         hfsc.enqueue(l1_c1_l2_c1, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&DATA));
+        assert!(pkt.append(&mut *pool, &DATA));
         pkt.out_ifindex = l1_c1_l2_c2;
         hfsc.enqueue(l1_c1_l2_c2, pkt);
 
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&DATA));
+        assert!(pkt.append(&mut *pool, &DATA));
         pkt.out_ifindex = l1_c2_l2_c1;
         hfsc.enqueue(l1_c2_l2_c1, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&DATA));
+        assert!(pkt.append(&mut *pool, &DATA));
         pkt.out_ifindex = l1_c2_l2_c2;
         hfsc.enqueue(l1_c2_l2_c2, pkt);
     }
@@ -324,7 +326,7 @@ fn test_get_time_ns() -> u64 {
 // if the realtime sessions are lagging behind in time
 #[test]
 fn single_level_realtime() {
-    let pool = packet_pool("hfsc_1lvl_rt");
+    let mut pool = packet_pool("hfsc_1lvl_rt");
     let f_sc_10mb = Sc {
         m1: 0,
         d: 0,
@@ -405,19 +407,19 @@ fn single_level_realtime() {
 
     for _ in 0..512 {
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&DATA));
+        assert!(pkt.append(&mut *pool, &DATA));
         pkt.out_ifindex = class1;
         hfsc.enqueue(class1, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&DATA));
+        assert!(pkt.append(&mut *pool, &DATA));
         pkt.out_ifindex = class2;
         hfsc.enqueue(class2, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&DATA));
+        assert!(pkt.append(&mut *pool, &DATA));
         pkt.out_ifindex = class3;
         hfsc.enqueue(class3, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&DATA));
+        assert!(pkt.append(&mut *pool, &DATA));
         pkt.out_ifindex = class4;
         hfsc.enqueue(class4, pkt);
     }

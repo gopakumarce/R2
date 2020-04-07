@@ -6,6 +6,7 @@ edition = "2018"
 
 [dependencies]
 thrift = "0.13.0"
+crossbeam-queue = "0.2.1"
 common = { path = "../common" }
 packet = { path = "../packet" }
 graph = { path = "../graph" }

@@ -16,7 +16,7 @@ pub enum R2Msg {
 }
 
 impl R2Msg {
-    pub fn clone(&self, counters: &mut Counters, logger: Arc<Logger>) -> R2Msg {
+    pub fn clone(&self, counters: &mut Counters, logger: Arc<Logger>) -> Self {
         match self {
             R2Msg::GnodeAdd(gnode_add) => R2Msg::GnodeAdd(gnode_add.clone(counters, logger)),
             R2Msg::EpollAdd(epoll_add) => R2Msg::EpollAdd(epoll_add.clone()),
@@ -34,7 +34,7 @@ pub struct GnodeAddMsg {
 }
 
 impl GnodeAddMsg {
-    pub fn clone(&self, counters: &mut Counters, logger: Arc<Logger>) -> GnodeAddMsg {
+    pub fn clone(&self, counters: &mut Counters, logger: Arc<Logger>) -> Self {
         GnodeAddMsg {
             node: self.node.clone(counters, logger),
             init: self.init.clone(counters),

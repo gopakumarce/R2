@@ -6,21 +6,19 @@ use packet::{BoxPart, BoxPkt, PacketPool};
 struct R2PktPool {}
 
 impl PacketPool for R2PktPool {
-    fn pkt(&self, _headroom: usize) -> Option<BoxPkt> {
+    fn pkt(&mut self, _headroom: usize) -> Option<BoxPkt> {
         None
     }
 
-    fn particle(&self, _headroom: usize) -> Option<BoxPart> {
+    fn particle(&mut self, _headroom: usize) -> Option<BoxPart> {
         None
     }
 
-    fn free_pkt(&self, _pkt: &BoxPkt) {}
+    fn free_pkt(&mut self, _pkt: BoxPkt) {}
 
-    fn free_part(&self, _part: &BoxPart) {}
+    fn free_part(&mut self, _part: BoxPart) {}
 
     fn particle_sz(&self) -> usize {
         0
     }
-
-    fn free(&self) {}
 }

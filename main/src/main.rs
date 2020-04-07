@@ -3,13 +3,13 @@ use apis_interface::InterfaceSyncProcessor;
 use apis_log::LogSyncProcessor;
 use apis_route::RouteSyncProcessor;
 use counters::Counters;
+use crossbeam_queue::ArrayQueue;
 use efd::Efd;
 use epoll::{Epoll, EpollClient, EPOLLIN};
 use graph::{GnodeCntrs, GnodeInit, Graph};
 use l2_eth_encap::EncapMux;
 use log::Logger;
 use msg::R2Msg;
-
 use names::rx_tx;
 use packet::PktsHeap;
 use std::collections::HashMap;
@@ -31,7 +31,7 @@ const THREADS: usize = 2;
 const LOGSZ: usize = 32;
 const LOGLINES: usize = 1000;
 const MAX_FDS: i32 = 4000;
-const DEF_PKTS: usize = 4096;
+const DEF_PKTS: usize = 512;
 const DEF_PARTS: usize = 2 * DEF_PKTS;
 const DEF_PARTICLE_SZ: usize = 2048;
 pub const MAX_HEADROOM: usize = 100;
@@ -42,7 +42,6 @@ pub const MAX_HEADROOM: usize = 100;
 // take a lock and modify this
 pub struct R2 {
     counters: Counters,
-    pkt_pool: Arc<PktsHeap>,
     fwd2ctrl: Sender<R2Msg>,
     nthreads: usize,
     threads: Vec<R2PerThread>,
@@ -58,12 +57,11 @@ impl R2 {
         log_size: usize,
         fwd2ctrl: Sender<R2Msg>,
         nthreads: usize,
-    ) -> R2 {
-        let mut counters = match Counters::new(counter_name) {
+    ) -> Self {
+        let counters = match Counters::new(counter_name) {
             Ok(c) => c,
             Err(errno) => panic!("Unable to create counters, errno {}", errno),
         };
-        let pkt_pool = PktsHeap::new(&mut counters, DEF_PKTS, DEF_PARTS, DEF_PARTICLE_SZ);
 
         let mut threads = Vec::new();
         for t in 0..nthreads {
@@ -84,7 +82,6 @@ impl R2 {
 
         R2 {
             counters,
-            pkt_pool,
             fwd2ctrl,
             nthreads,
             threads,
@@ -148,7 +145,7 @@ fn create_nodes(r2: &mut R2, g: &mut Graph<R2Msg>) {
 // that has the XYZSyncHandler trait implmented -  the XYZSyncHandler trait will
 // implement all the APIs that XYZ module wants to expose (defined in thrift files)
 fn register_apis(r2: Arc<Mutex<R2>>) -> ApiSvr {
-    let mut svr = ApiSvr::new(common::API_SVR);
+    let mut svr = ApiSvr::new(common::API_SVR.to_string());
 
     let intf_apis = InterfaceApis::new(r2.clone());
     svr.register(
@@ -188,6 +185,7 @@ fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
     for fd in r2.threads[thread].poll_fds.iter() {
         epoll.add(*fd, EPOLLIN);
     }
+
     let name = format!("r2-{}", thread);
     thread::Builder::new()
         .name(name)
@@ -212,7 +210,21 @@ fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
 
 fn launch_threads(r2: &mut R2, graph: Graph<R2Msg>) {
     for t in 1..r2.nthreads {
-        let g = graph.clone(t, &mut r2.counters, r2.threads[t].logger.clone());
+        let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
+        let pool = Box::new(PktsHeap::new(
+            queue.clone(),
+            &mut r2.counters,
+            DEF_PKTS,
+            DEF_PARTS,
+            DEF_PARTICLE_SZ,
+        ));
+        let g = graph.clone(
+            t,
+            pool,
+            queue,
+            &mut r2.counters,
+            r2.threads[t].logger.clone(),
+        );
         create_thread(r2, g, t);
     }
     create_thread(r2, graph, 0);
@@ -239,7 +251,15 @@ fn main() {
         THREADS,
     )));
     let mut r2 = r2_rc.lock().unwrap();
-    let mut graph = Graph::<R2Msg>::new(0, &mut r2.counters);
+    let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
+    let pool = Box::new(PktsHeap::new(
+        queue.clone(),
+        &mut r2.counters,
+        DEF_PKTS,
+        DEF_PARTS,
+        DEF_PARTICLE_SZ,
+    ));
+    let mut graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
     create_nodes(&mut r2, &mut graph);
     launch_threads(&mut r2, graph);
 

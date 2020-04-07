@@ -107,12 +107,7 @@ fn unwrap_curves(curves: &CurvesApi) -> Curves {
 }
 
 fn create_eth_nodes(r2: &mut R2, intf: Arc<Interface>) {
-    let decap = EthDecap::new(
-        intf.clone(),
-        r2.pkt_pool.clone(),
-        &mut r2.counters,
-        r2.fwd2ctrl.clone(),
-    );
+    let decap = EthDecap::new(intf.clone(), &mut r2.counters, r2.fwd2ctrl.clone());
     let init = GnodeInit {
         name: decap.name(),
         next_names: decap.next_names(),
@@ -125,7 +120,7 @@ fn create_eth_nodes(r2: &mut R2, intf: Arc<Interface>) {
     let msg = R2Msg::GnodeAdd(msg);
     r2.broadcast(msg);
 
-    let encap = EthEncap::new(intf, r2.pkt_pool.clone(), &mut r2.counters);
+    let encap = EthEncap::new(intf, &mut r2.counters);
     let init = GnodeInit {
         name: encap.name(),
         next_names: encap.next_names(),
@@ -151,13 +146,7 @@ pub fn create_interface_node(
     r2.ifd.last_thread = (thread + 1) % r2.nthreads;
     let thread_mask = 1 << thread;
     let efd = r2.threads[thread].efd.clone();
-    let intf = match IfNode::new(
-        &mut r2.counters,
-        thread_mask,
-        efd,
-        interface.clone(),
-        r2.pkt_pool.clone(),
-    ) {
+    let intf = match IfNode::new(&mut r2.counters, thread_mask, efd, interface.clone()) {
         Ok(intf) => intf,
         Err(errno) => return Err(-errno),
     };

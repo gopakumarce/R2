@@ -58,19 +58,13 @@ struct Cnt {
 // support plain ethernet packets without vlan tags.
 pub struct EthDecap {
     intf: Arc<Interface>,
-    pool: Arc<dyn PacketPool>,
     mac: HashMap<Ipv4Addr, EthMacRaw>,
     sender: Sender<R2Msg>,
     cnt: Cnt,
 }
 
 impl EthDecap {
-    pub fn new(
-        intf: Arc<Interface>,
-        pool: Arc<dyn PacketPool>,
-        counters: &mut Counters,
-        sender: Sender<R2Msg>,
-    ) -> EthDecap {
+    pub fn new(intf: Arc<Interface>, counters: &mut Counters, sender: Sender<R2Msg>) -> Self {
         let unknown_ethtype = Counter::new(
             counters,
             &l2_eth_decap(intf.ifindex),
@@ -103,7 +97,6 @@ impl EthDecap {
         );
         EthDecap {
             intf,
-            pool,
             mac: HashMap::new(),
             sender,
             cnt: Cnt {
@@ -129,8 +122,13 @@ impl EthDecap {
         v
     }
 
-    fn do_arp_reply(&self, src_ip: Ipv4Addr, src_mac: &[u8]) -> Option<BoxPkt> {
-        let pkt = self.pool.pkt(0 /* no headroom */);
+    fn do_arp_reply(
+        &self,
+        pool: &mut dyn PacketPool,
+        src_ip: Ipv4Addr,
+        src_mac: &[u8],
+    ) -> Option<BoxPkt> {
+        let pkt = pool.pkt(0 /* no headroom */);
         pkt.as_ref()?;
         let mut pkt = pkt.unwrap();
         let raw = pkt.data_raw_mut();
@@ -178,7 +176,7 @@ impl EthDecap {
         Some(pkt)
     }
 
-    fn process_arp(&mut self, mac: &[u8], len: usize) -> Option<BoxPkt> {
+    fn process_arp(&mut self, pool: &mut dyn PacketPool, mac: &[u8], len: usize) -> Option<BoxPkt> {
         let off = EthOffsets::EthOpcodeOff as usize;
         let op = u16::from_be_bytes([mac[off], mac[off + 1]]);
         let off = EthOffsets::EthProtoOff as usize;
@@ -187,7 +185,7 @@ impl EthDecap {
             self.process_arp_reply(mac, len);
             None
         } else if op == ARP_OPCODE_REQ && proto == ETH_TYPE_IPV4 {
-            self.process_arp_req(mac, len)
+            self.process_arp_req(pool, mac, len)
         } else {
             self.cnt.unknown_arp.incr();
             None
@@ -223,7 +221,12 @@ impl EthDecap {
         }
     }
 
-    fn process_arp_req(&mut self, mac: &[u8], _len: usize) -> Option<BoxPkt> {
+    fn process_arp_req(
+        &mut self,
+        pool: &mut dyn PacketPool,
+        mac: &[u8],
+        _len: usize,
+    ) -> Option<BoxPkt> {
         let off = EthOffsets::EthTargetIpOff as usize;
         let dst_ip = &mac[off..off + 4];
         if self.intf.ipv4_addr.octets() != dst_ip {
@@ -236,7 +239,7 @@ impl EthDecap {
         let off = EthOffsets::EthSenderMacOff as usize;
         let src_mac = &mac[off..off + ETH_ALEN];
         self.mac_learn(src_ip, src_mac);
-        self.do_arp_reply(src_ip, src_mac)
+        self.do_arp_reply(pool, src_ip, src_mac)
     }
 
     fn process_arp_reply(&mut self, mac: &[u8], _len: usize) {
@@ -285,7 +288,6 @@ impl Gclient<R2Msg> for EthDecap {
             Counter::new(counters, &self.name(), CounterType::Error, "mac_send_fail");
         Box::new(EthDecap {
             intf: self.intf.clone(),
-            pool: self.pool.clone(),
             mac: HashMap::new(),
             sender: self.sender.clone(),
             cnt: Cnt {
@@ -306,7 +308,7 @@ impl Gclient<R2Msg> for EthDecap {
             let off = EthOffsets::EthTypeOff as usize;
             let ethtype = u16::from_be_bytes([mac[off], mac[off + 1]]);
             if ethtype == ETH_TYPE_ARP {
-                if let Some(arp) = self.process_arp(mac, len) {
+                if let Some(arp) = self.process_arp(vectors.pool, mac, len) {
                     vectors.push(Next::TX as usize, arp);
                 }
             } else {

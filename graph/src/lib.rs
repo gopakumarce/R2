@@ -1,7 +1,9 @@
 use counters::flavors::{Counter, CounterType};
 use counters::Counters;
+use crossbeam_queue::ArrayQueue;
 use log::Logger;
 use packet::BoxPkt;
+use packet::PacketPool;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -33,6 +35,7 @@ pub trait Gclient<T>: Send {
 /// the node to queue up packets to other nodes
 pub struct Dispatch<'d> {
     node: usize,
+    pub pool: &'d mut dyn PacketPool,
     vectors: &'d mut Vec<VecDeque<BoxPkt>>,
     counters: &'d mut Vec<GnodeCntrs>,
     nodes: &'d Vec<usize>,
@@ -126,16 +129,16 @@ struct Gnode<T> {
 }
 
 impl<T> Gnode<T> {
-    fn new(client: Box<dyn Gclient<T>>, name: &str, next_names: Vec<String>) -> Gnode<T> {
+    fn new(client: Box<dyn Gclient<T>>, name: String, next_names: Vec<String>) -> Self {
         Gnode {
             client,
-            name: name.to_string(),
+            name,
             next_names,
             next_nodes: Vec::new(),
         }
     }
 
-    fn clone(&self, counters: &mut Counters, log: Arc<Logger>) -> Gnode<T> {
+    fn clone(&self, counters: &mut Counters, log: Arc<Logger>) -> Self {
         Gnode {
             client: self.client.clone(counters, log),
             name: self.name.clone(),
@@ -159,18 +162,29 @@ pub struct Graph<T> {
     // Each graph node has an index which is an offset into the nodes Vec in this structure.
     // This hashmap provides a mapping from a graph node name to its index
     indices: HashMap<String, usize>,
+    // Packet/Particle pool
+    pool: Box<dyn PacketPool>,
+    // Freed packets are queued here
+    queue: Arc<ArrayQueue<BoxPkt>>,
 }
 
 impl<T> Graph<T> {
     /// A new graph is created with just one node in it, a Drop Node that just drops any packet
     /// it receives.
-    pub fn new(thread: usize, counters: &mut Counters) -> Graph<T> {
+    pub fn new(
+        thread: usize,
+        pool: Box<dyn PacketPool>,
+        queue: Arc<ArrayQueue<BoxPkt>>,
+        counters: &mut Counters,
+    ) -> Self {
         let mut g = Graph {
             thread,
             nodes: Vec::with_capacity(GRAPH_INIT_SZ),
             vectors: Vec::with_capacity(GRAPH_INIT_SZ),
             counters: Vec::with_capacity(GRAPH_INIT_SZ),
             indices: HashMap::with_capacity(GRAPH_INIT_SZ),
+            pool,
+            queue,
         };
         let init = GnodeInit {
             name: names::DROP.to_string(),
@@ -184,7 +198,14 @@ impl<T> Graph<T> {
 
     /// Clone the entire graph. That relies on each graph node feature/client providing
     /// an ability to clone() itself
-    pub fn clone(&self, thread: usize, counters: &mut Counters, log: Arc<Logger>) -> Graph<T> {
+    pub fn clone(
+        &self,
+        thread: usize,
+        pool: Box<dyn PacketPool>,
+        queue: Arc<ArrayQueue<BoxPkt>>,
+        counters: &mut Counters,
+        log: Arc<Logger>,
+    ) -> Self {
         let mut nodes = Vec::with_capacity(GRAPH_INIT_SZ);
         let mut vectors = Vec::with_capacity(GRAPH_INIT_SZ);
         let mut cntrs = Vec::with_capacity(GRAPH_INIT_SZ);
@@ -199,6 +220,8 @@ impl<T> Graph<T> {
             vectors,
             counters: cntrs,
             indices: self.indices.clone(),
+            pool,
+            queue,
         }
     }
 
@@ -210,7 +233,7 @@ impl<T> Graph<T> {
         }
 
         self.nodes
-            .push(Gnode::new(client, &init.name, init.next_names));
+            .push(Gnode::new(client, init.name.clone(), init.next_names));
         self.vectors.push(VecDeque::with_capacity(VEC_SIZE));
         self.counters.push(init.cntrs);
         let index = self.nodes.len() - 1; // 0 based index
@@ -248,6 +271,10 @@ impl<T> Graph<T> {
     // iteration, and return values which say if more work is pending and at what time
     // the work has to be done
     pub fn run(&mut self) -> (bool, usize) {
+        // First return all the free packets back to the pool
+        while let Ok(p) = self.queue.pop() {
+            self.pool.free(p);
+        }
         let mut nsecs = std::usize::MAX;
         let mut work = false;
         for n in 0..self.nodes.len() {
@@ -255,6 +282,7 @@ impl<T> Graph<T> {
             let client = &mut node.client;
             let mut d = Dispatch {
                 node: n,
+                pool: &mut *self.pool,
                 vectors: &mut self.vectors,
                 counters: &mut self.counters,
                 nodes: &node.next_nodes,

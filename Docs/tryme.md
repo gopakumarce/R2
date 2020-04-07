@@ -37,11 +37,13 @@ The steps below have been tested on brand new Ubuntu installations 18.04 and 16.
    git clone git@github.com:gopakumarce/R2.git
    ```
 
-4. In the R2 source code root directory, type the below command. The first time compilation can take a few seconds, the R2 build system cargo downloads source code for all dependencies and compiles them them the first time.
+4. In the R2 source code root directory, type the below command. The first two commands 'sudo usermod' and 'newgrp docker' adds your user to the docker group so you can create docker containers etc.. with your userid. The first time compilation can take a few seconds, the R2 build system 'cargo', downloads source code for all dependencies and compiles them them the first time. NOTE: Various things inside the script like creating new interfaces etc.., are also run with 'sudo' permissions
 
    ```c
+   sudo usermod -aG docker $USER
+   newgrp docker
    cd R2
-   sudo ./tryme.sh
+   ./tryme.sh
    ```
 
 ## Play around, have fun
@@ -49,9 +51,9 @@ The steps below have been tested on brand new Ubuntu installations 18.04 and 16.
 Once step4 is complete, attach to the containers, type route -n, ifconfig etc.. to see the interfaces and ip addresses, and ping from one container to the other. The ping gets routed via R2. Use commands below to attach to either container, ctrl-d to exit. Commands to attach to each container and ping the ip address in the other container, is below. R2 itself does not respond to ping today, so if you ping R2 itself, that will fail.
 
 ```c
-sudo docker exec -it R2_client1 sh
+docker exec -it R2_client1 sh
 ping 2.1.1.1
-sudo docker exec -it R2_client2 sh
+docker exec -it R2_client2 sh
 ping 1.1.1.1
 ```
 
@@ -63,7 +65,5 @@ sudo ./target/debug/r2rt route 4.1.1.1/32 1.1.1.1 veth_r2_1
 ```
 
 ## Contributing to R2 
-
-Note that the tryme.sh does the compilation (cargo build), and since tryme.sh is run as sudo to create interfaces etc.., the build target objects will be created with different permissions. You can do a 'sudo cargo clean' and build again without sudo.
 
 To contribute to R2, pull R2, make bug fixes, run "cargo test" and ensure everything passes and send a merge request. If you are adding new functionalities, there should be unit test cases which can be run by cargo test.

@@ -230,7 +230,7 @@ pub struct Hfsc {
 }
 
 impl Hfsc {
-    pub fn new(bandwidth: usize) -> Hfsc {
+    pub fn new(bandwidth: usize) -> Self {
         let f_sc = Sc {
             m1: 0,
             d: 0,
@@ -663,7 +663,7 @@ impl Class {
         is_leaf: bool,
         pvoff: u64,
         curves: Curves,
-    ) -> Class {
+    ) -> Self {
         let mut r_isc = None;
         let mut e_run = Default::default();
         let mut d_run = Default::default();
@@ -717,7 +717,7 @@ impl Class {
         }
     }
 
-    fn dummy() -> Class {
+    fn dummy() -> Self {
         let f_sc = Default::default();
         let curves = Curves {
             r_sc: None,
@@ -761,7 +761,7 @@ impl Class {
 }
 
 impl Clone for Class {
-    fn clone(&self) -> Class {
+    fn clone(&self) -> Self {
         Class {
             in_use: self.in_use,
             leaf: self.leaf,

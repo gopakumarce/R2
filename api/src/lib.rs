@@ -22,9 +22,9 @@ pub struct ApiSvr {
 
 impl ApiSvr {
     /// A new server listening on address 'addr'
-    pub fn new(addr: &str) -> ApiSvr {
+    pub fn new(addr: String) -> ApiSvr {
         ApiSvr {
-            addr: addr.to_string(),
+            addr,
             clients: Vec::new(),
         }
     }

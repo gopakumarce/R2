@@ -1,5 +1,6 @@
 use super::*;
 use counters::Counters;
+use crossbeam_queue::ArrayQueue;
 use packet::{PacketPool, PktsHeap};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -11,9 +12,10 @@ const NUM_PART: usize = 20;
 const MAX_PACKET: usize = 1500;
 const PARTICLE_SZ: usize = 512;
 
-fn packet_pool(test: &str, part_sz: usize) -> Arc<PktsHeap> {
+fn packet_pool(test: &str, part_sz: usize) -> Box<dyn PacketPool> {
+    let q = Arc::new(ArrayQueue::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
-    PktsHeap::new(&mut counters, NUM_PKTS, NUM_PART, part_sz)
+    Box::new(PktsHeap::new(q, &mut counters, NUM_PKTS, NUM_PART, part_sz))
 }
 
 fn delete_veth() {
@@ -86,7 +88,7 @@ fn read_write() {
     let wait = Arc::new(AtomicUsize::new(0));
     let done = wait.clone();
     let tname = "rx".to_string();
-    let pool = packet_pool("sock_read_write_rx", MAX_PACKET);
+    let mut pool = packet_pool("sock_read_write_rx", MAX_PACKET);
     let handler = thread::Builder::new().name(tname).spawn(move || {
         let raw = match RawSock::new("r2_eth2", false) {
             Ok(raw) => raw,
@@ -116,9 +118,9 @@ fn read_write() {
     assert!(raw.fd > 0);
     let data: Vec<u8> = (0..MAX_PACKET).map(|x| (x % 256) as u8).collect();
     // Send data as multi particle pkt
-    let pool = packet_pool("sock_read_write_tx", PARTICLE_SZ);
+    let mut pool = packet_pool("sock_read_write_tx", PARTICLE_SZ);
     let mut pkt = pool.pkt(0).unwrap();
-    assert!(pkt.append(&data[0..]));
+    assert!(pkt.append(&mut *pool, &data[0..]));
     while wait.load(Ordering::Relaxed) == 0 {
         assert_eq!(raw.sendmsg(&mut pkt), MAX_PACKET);
     }
