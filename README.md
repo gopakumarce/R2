@@ -39,4 +39,3 @@ See the issues section in R2's github page to see the list of bugs/enhancements 
 The logo depicts a macrophage. It was a funny-looking stuffed toy in my wife's microbiology lab, which turned into this cartoon version. To try and give it a software spin (as an afterthought), macrophages are constantly cleaning up "bad stuff" from a biological system - and that aligns well with the being 'Pristine'  goal of R2.  
 
 The logo is created by the talented graphics artist Shalaka <https://www.behance.net/shalakasdesign>. I tried to draw one myself and after a days worth of effort even my very basic version went nowhere. I quickly realized how much of artistic talent and skill one needs to create a logo. It was amazing to see the dexterity with which Shalaka created multiple versions of the logo in no time!
-

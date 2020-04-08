@@ -129,10 +129,10 @@ struct Gnode<T> {
 }
 
 impl<T> Gnode<T> {
-    fn new(client: Box<dyn Gclient<T>>, name: &str, next_names: Vec<String>) -> Self {
+    fn new(client: Box<dyn Gclient<T>>, name: String, next_names: Vec<String>) -> Self {
         Gnode {
             client,
-            name: name.to_string(),
+            name,
             next_names,
             next_nodes: Vec::new(),
         }
@@ -233,7 +233,7 @@ impl<T> Graph<T> {
         }
 
         self.nodes
-            .push(Gnode::new(client, &init.name, init.next_names));
+            .push(Gnode::new(client, init.name.clone(), init.next_names));
         self.vectors.push(VecDeque::with_capacity(VEC_SIZE));
         self.counters.push(init.cntrs);
         let index = self.nodes.len() - 1; // 0 based index

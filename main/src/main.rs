@@ -145,7 +145,7 @@ fn create_nodes(r2: &mut R2, g: &mut Graph<R2Msg>) {
 // that has the XYZSyncHandler trait implmented -  the XYZSyncHandler trait will
 // implement all the APIs that XYZ module wants to expose (defined in thrift files)
 fn register_apis(r2: Arc<Mutex<R2>>) -> ApiSvr {
-    let mut svr = ApiSvr::new(common::API_SVR);
+    let mut svr = ApiSvr::new(common::API_SVR.to_string());
 
     let intf_apis = InterfaceApis::new(r2.clone());
     svr.register(
