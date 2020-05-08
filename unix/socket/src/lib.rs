@@ -1,4 +1,3 @@
-use libc;
 use packet::BoxPkt;
 use std::ffi::CString;
 use std::mem;

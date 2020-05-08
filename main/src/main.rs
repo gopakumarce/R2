@@ -197,9 +197,8 @@ fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
             // if the scheduler has work to be done at a future time in which case we can yield
             // till that time.
             while work {
-                match g.run() {
-                    (w, _) => work = w,
-                }
+                let (w, _) = g.run();
+                work = w;
                 // interleave packet forwarding with checking for control messages, depending
                 // on performance measurements, this can be done (much) less frequently
                 ctrl2fwd_messages(thread, &mut epoll, &receiver, &mut g);

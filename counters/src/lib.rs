@@ -1,6 +1,5 @@
 use self::flavors::CounterRO;
 use bin::Bin;
-use common;
 use shm::{shm_close, shm_open_ro, shm_open_rw, shm_unlink};
 use std::collections::HashMap;
 use std::mem::size_of;
