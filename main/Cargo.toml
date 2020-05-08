@@ -19,6 +19,7 @@ efd = { path = "../unix/efd" }
 counters = { path = "../counters" }
 fwd = { path = "../fwd" }
 log = { path = "../log" }
+perf = { path = "../perf" }
 msg = { path = "../msg" }
 l2_eth_encap = { path = "../gnodes/layer2/eth/encap" }
 l2_eth_decap = { path = "../gnodes/layer2/eth/decap" }

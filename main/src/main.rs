@@ -26,6 +26,7 @@ use msgs::{ctrl2fwd_messages, fwd2ctrl_messages};
 mod logs;
 use logs::LogApis;
 mod pkts;
+use perf::Perf;
 
 const THREADS: usize = 2;
 const LOGSZ: usize = 32;
@@ -126,6 +127,7 @@ fn create_ethernet_mux(r2: &mut R2, g: &mut Graph<R2Msg>) {
         name: emux.name(),
         next_names: emux.next_names(),
         cntrs: GnodeCntrs::new(&emux.name(), &mut r2.counters),
+        perf: Perf::new(&emux.name(), &mut r2.counters),
     };
     g.add(Box::new(emux), init);
 }

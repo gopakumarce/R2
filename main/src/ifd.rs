@@ -11,6 +11,7 @@ use l2_eth_encap::EthEncap;
 use msg::EpollAddMsg;
 use msg::{ClassAddMsg, GnodeAddMsg};
 use msg::{Curves, Sc};
+use perf::Perf;
 use std::net::Ipv4Addr;
 
 pub struct InterfaceApis {
@@ -112,6 +113,7 @@ fn create_eth_nodes(r2: &mut R2, intf: Arc<Interface>) {
         name: decap.name(),
         next_names: decap.next_names(),
         cntrs: GnodeCntrs::new(&decap.name(), &mut r2.counters),
+        perf: Perf::new(&decap.name(), &mut r2.counters),
     };
     let msg = GnodeAddMsg {
         node: Box::new(decap),
@@ -125,6 +127,7 @@ fn create_eth_nodes(r2: &mut R2, intf: Arc<Interface>) {
         name: encap.name(),
         next_names: encap.next_names(),
         cntrs: GnodeCntrs::new(&encap.name(), &mut r2.counters),
+        perf: Perf::new(&encap.name(), &mut r2.counters),
     };
     let msg = GnodeAddMsg {
         node: Box::new(encap),
@@ -169,6 +172,7 @@ pub fn create_interface_node(
         name: intf.name(),
         next_names: intf.next_names(),
         cntrs: GnodeCntrs::new(&intf.name(), &mut r2.counters),
+        perf: Perf::new(&intf.name(), &mut r2.counters),
     };
     let msg = GnodeAddMsg {
         node: Box::new(intf),

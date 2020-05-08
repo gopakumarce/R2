@@ -8,7 +8,7 @@ use std::sync::Arc;
 const PKTSZ: usize = 256;
 const DATA: [u8; PKTSZ] = [0; PKTSZ];
 // Time in nano seconds to send one packet
-const PKT_TIME: u64 = (PKTSZ as u64 * 8 * 1_000_000_000 / (1024 * 1024));
+const PKT_TIME: u64 = PKTSZ as u64 * 8 * 1_000_000_000 / (1024 * 1024);
 const NUM_PKTS: usize = 4096;
 const NUM_PART: usize = 2 * 4096;
 

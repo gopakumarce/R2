@@ -106,7 +106,9 @@ impl Gclient<R2Msg> for IPv4Fwd {
                         }
                         vectors.push(Next::EncapMux as usize, p);
                     }
-                    _ => self.cnt.no_route.incr(),
+                    _ => {
+                        let _ = self.cnt.no_route.incr();
+                    }
                 }
             } else {
                 self.cnt.no_route.incr();

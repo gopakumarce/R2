@@ -9,7 +9,7 @@ fn basic_test() {
     for i in 0..100 {
         let mut name = "counter".to_string();
         name.push_str(&i.to_string());
-        let c = Counter::new(&mut counters, "test", CounterType::Error, &name);
+        let mut c = Counter::new(&mut counters, "test", CounterType::Error, &name);
         c.add(123_456 + i);
         vec.push(c);
     }
@@ -35,7 +35,7 @@ fn free_test() {
     for i in 0..50 {
         let mut name = "counter".to_string();
         name.push_str(&i.to_string());
-        let c = Counter::new(&mut counters, "test", CounterType::Error, &name);
+        let mut c = Counter::new(&mut counters, "test", CounterType::Error, &name);
         c.add(123_456 + i);
         vec1.push(c);
     }
@@ -43,7 +43,7 @@ fn free_test() {
     for i in 50..100 {
         let mut name = "counter".to_string();
         name.push_str(&i.to_string());
-        let c = Counter::new(&mut counters, "test", CounterType::Error, &name);
+        let mut c = Counter::new(&mut counters, "test", CounterType::Error, &name);
         c.add(123_456 + i);
         vec2.push(c);
     }
@@ -80,7 +80,7 @@ fn basic_pkts_bytes_test() {
     for i in 0..100 {
         let mut name = "counter".to_string();
         name.push_str(&i.to_string());
-        let c = PktsBytes::new(&mut counters, "test", CounterType::Error, &name);
+        let mut c = PktsBytes::new(&mut counters, "test", CounterType::Error, &name);
         c.add(i, 123_456 + i);
         vec.push(c);
     }
@@ -108,7 +108,7 @@ fn free_pkts_bytes_test() {
     for i in 0..50 {
         let mut name = "counter".to_string();
         name.push_str(&i.to_string());
-        let c = PktsBytes::new(&mut counters, "test", CounterType::Error, &name);
+        let mut c = PktsBytes::new(&mut counters, "test", CounterType::Error, &name);
         c.add(i, 123_456 + i);
         vec1.push(c);
     }
@@ -116,7 +116,7 @@ fn free_pkts_bytes_test() {
     for i in 50..100 {
         let mut name = "counter".to_string();
         name.push_str(&i.to_string());
-        let c = PktsBytes::new(&mut counters, "test", CounterType::Error, &name);
+        let mut c = PktsBytes::new(&mut counters, "test", CounterType::Error, &name);
         c.add(i, 123_456 + i);
         vec2.push(c);
     }
@@ -156,7 +156,7 @@ fn basic_vec_test() {
     for i in 0..100 {
         let mut name = "counter".to_string();
         name.push_str(&i.to_string());
-        let c = CounterArray::new(&mut counters, "test", CounterType::Error, &name, nvec);
+        let mut c = CounterArray::new(&mut counters, "test", CounterType::Error, &name, nvec);
         for v in 0..nvec {
             c.add(v, (123_456 + v + i) as u64);
         }
@@ -187,7 +187,7 @@ fn free_vec_test() {
     for i in 0..50 {
         let mut name = "counter".to_string();
         name.push_str(&i.to_string());
-        let c = CounterArray::new(&mut counters, "test", CounterType::Error, &name, nvec);
+        let mut c = CounterArray::new(&mut counters, "test", CounterType::Error, &name, nvec);
         for v in 0..nvec {
             c.add(v, (123_456 + v + i) as u64);
         }
@@ -198,7 +198,7 @@ fn free_vec_test() {
     for i in 50..100 {
         let mut name = "counter".to_string();
         name.push_str(&i.to_string());
-        let c = CounterArray::new(&mut counters, "test", CounterType::Error, &name, nvec);
+        let mut c = CounterArray::new(&mut counters, "test", CounterType::Error, &name, nvec);
         for v in 0..nvec {
             c.add(v, (123_456 + v + i) as u64);
         }
@@ -235,14 +235,14 @@ fn free_vec_test() {
 fn combined_test() {
     let mut counters = Counters::new("combined_test").unwrap();
 
-    let basic = Counter::new(&mut counters, "test", CounterType::Error, "basic");
+    let mut basic = Counter::new(&mut counters, "test", CounterType::Error, "basic");
     basic.add(123_456);
 
-    let pb = PktsBytes::new(&mut counters, "test", CounterType::Error, "pktsbytes");
+    let mut pb = PktsBytes::new(&mut counters, "test", CounterType::Error, "pktsbytes");
     pb.add(100, 123_456);
 
     let nvec = VEC.binmax as usize;
-    let array = CounterArray::new(&mut counters, "test", CounterType::Error, "array", nvec);
+    let mut array = CounterArray::new(&mut counters, "test", CounterType::Error, "array", nvec);
     for v in 0..nvec {
         array.add(v, 123_456 + v as u64);
     }

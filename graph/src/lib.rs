@@ -4,6 +4,7 @@ use crossbeam_queue::ArrayQueue;
 use log::Logger;
 use packet::BoxPkt;
 use packet::PacketPool;
+use perf::Perf;
 use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -90,6 +91,7 @@ pub struct GnodeInit {
     pub next_names: Vec<String>,
     /// A set of generic counters that tracks the node's enqueue/dequeue/drops etc..
     pub cntrs: GnodeCntrs,
+    pub perf: Perf,
 }
 
 impl GnodeInit {
@@ -98,6 +100,7 @@ impl GnodeInit {
             name: self.name.clone(),
             next_names: self.next_names.clone(),
             cntrs: GnodeCntrs::new(&self.name, counters),
+            perf: Perf::new(&self.name, counters),
         }
     }
 }
@@ -155,6 +158,8 @@ pub struct Graph<T> {
     thread: usize,
     // The graph nodes
     nodes: Vec<Gnode<T>>,
+    // Graph node performance info
+    perf: Vec<Perf>,
     // A per node packet queue, to hold packets from other nodes to this node
     vectors: Vec<VecDeque<BoxPkt>>,
     // Generic enq/deq/drop counters per node
@@ -180,6 +185,7 @@ impl<T> Graph<T> {
         let mut g = Graph {
             thread,
             nodes: Vec::with_capacity(GRAPH_INIT_SZ),
+            perf: Vec::with_capacity(GRAPH_INIT_SZ),
             vectors: Vec::with_capacity(GRAPH_INIT_SZ),
             counters: Vec::with_capacity(GRAPH_INIT_SZ),
             indices: HashMap::with_capacity(GRAPH_INIT_SZ),
@@ -190,6 +196,7 @@ impl<T> Graph<T> {
             name: names::DROP.to_string(),
             next_names: vec![],
             cntrs: GnodeCntrs::new(names::DROP, counters),
+            perf: Perf::new(names::DROP, counters),
         };
         let count = Counter::new(counters, names::DROP, CounterType::Pkts, "count");
         g.add(Box::new(DropNode { count }), init);
@@ -207,16 +214,19 @@ impl<T> Graph<T> {
         log: Arc<Logger>,
     ) -> Self {
         let mut nodes = Vec::with_capacity(GRAPH_INIT_SZ);
+        let mut perf = Vec::with_capacity(GRAPH_INIT_SZ);
         let mut vectors = Vec::with_capacity(GRAPH_INIT_SZ);
         let mut cntrs = Vec::with_capacity(GRAPH_INIT_SZ);
         for n in self.nodes.iter() {
             nodes.push(n.clone(counters, log.clone()));
+            perf.push(Perf::new(&n.name, counters));
             vectors.push(VecDeque::with_capacity(VEC_SIZE));
             cntrs.push(GnodeCntrs::new(&n.name, counters));
         }
         Graph {
             thread,
             nodes,
+            perf,
             vectors,
             counters: cntrs,
             indices: self.indices.clone(),
@@ -234,6 +244,7 @@ impl<T> Graph<T> {
 
         self.nodes
             .push(Gnode::new(client, init.name.clone(), init.next_names));
+        self.perf.push(init.perf);
         self.vectors.push(VecDeque::with_capacity(VEC_SIZE));
         self.counters.push(init.cntrs);
         let index = self.nodes.len() - 1; // 0 based index
@@ -289,7 +300,9 @@ impl<T> Graph<T> {
                 work: false,
                 wakeup: std::usize::MAX,
             };
+            self.perf[n].start();
             client.dispatch(self.thread, &mut d);
+            self.perf[n].stop();
             // Does client have more work pending, and when does it need to do that work ?
             if d.work {
                 work = true;

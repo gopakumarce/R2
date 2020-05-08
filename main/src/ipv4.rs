@@ -5,6 +5,7 @@ use fwd::ipv4::IPv4Table;
 use fwd::{adj::Adjacency, ipv4::IPv4Leaf, ipv4::IPv4TableMsg, Fwd};
 use l3_ipv4_fwd::IPv4Fwd;
 use l3_ipv4_parse::IPv4Parse;
+use perf::Perf;
 use std::fs::File;
 use std::io::prelude::*;
 use std::net::Ipv4Addr;
@@ -114,6 +115,7 @@ pub fn create_ipv4_nodes(r2: &mut R2, g: &mut Graph<R2Msg>) {
         name: ipv4_parse_node.name(),
         next_names: ipv4_parse_node.next_names(),
         cntrs: GnodeCntrs::new(&ipv4_parse_node.name(), &mut r2.counters),
+        perf: Perf::new(&ipv4_parse_node.name(), &mut r2.counters),
     };
     g.add(Box::new(ipv4_parse_node), init);
 
@@ -122,6 +124,7 @@ pub fn create_ipv4_nodes(r2: &mut R2, g: &mut Graph<R2Msg>) {
         name: ipv4_fwd_node.name(),
         next_names: ipv4_fwd_node.next_names(),
         cntrs: GnodeCntrs::new(&ipv4_fwd_node.name(), &mut r2.counters),
+        perf: Perf::new(&ipv4_fwd_node.name(), &mut r2.counters),
     };
     g.add(Box::new(ipv4_fwd_node), init);
 }

@@ -153,6 +153,7 @@ dependencies = [
  "log 0.1.0",
  "names 0.1.0",
  "packet 0.1.0",
+ "perf 0.1.0",
 ]
 
 [[package]]
@@ -336,6 +337,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "perf"
+version = "0.1.0"
+dependencies = [
+ "counters 0.1.0",
+]
+
+[[package]]
 name = "r2"
 version = "0.1.0"
 dependencies = [
@@ -359,6 +367,7 @@ dependencies = [
  "msg 0.1.0",
  "names 0.1.0",
  "packet 0.1.0",
+ "perf 0.1.0",
  "sched 0.1.0",
  "socket 0.1.0",
  "thrift 0.13.0 (registry+https://github.com/rust-lang/crates.io-index)",

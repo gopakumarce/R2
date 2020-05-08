@@ -10,3 +10,5 @@ names = { path = "../names" }
 packet = { path = "../packet" }
 counters = { path = "../counters" }
 log = { path = "../log" }
+perf = { path = "../perf" }
+

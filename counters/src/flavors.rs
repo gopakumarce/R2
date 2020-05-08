@@ -34,25 +34,27 @@ fn counter_name(node: &str, ctype: CounterType, name: &str) -> String {
 }
 
 impl Counter {
-    pub fn incr(&self) {
-        self.add(1);
+    pub fn incr(&mut self) -> u64 {
+        self.add(1)
     }
 
-    pub fn decr(&mut self) {
-        self.sub(1);
+    pub fn decr(&mut self) -> u64 {
+        self.sub(1)
     }
 
-    pub fn add(&self, val: u64) {
+    pub fn add(&mut self, val: u64) -> u64 {
         unsafe {
             let count = self.count as *mut u64;
             *count += val;
+            *count
         }
     }
 
-    pub fn sub(&self, val: u64) {
+    pub fn sub(&mut self, val: u64) -> u64 {
         unsafe {
             let count = self.count as *mut u64;
             *count -= val;
+            *count
         }
     }
 
@@ -80,29 +82,31 @@ pub struct PktsBytes {
 }
 
 impl PktsBytes {
-    pub fn incr(&self, val: u64) {
+    pub fn incr(&mut self, val: u64) -> u64 {
         self.add(1, val)
     }
 
-    pub fn decr(&self, val: u64) {
+    pub fn decr(&mut self, val: u64) -> u64 {
         self.sub(1, val)
     }
 
-    pub fn add(&self, pkts: u64, bytes: u64) {
+    pub fn add(&mut self, pkts: u64, bytes: u64) -> u64 {
         unsafe {
-            let count = self.pkts as *mut u64;
-            *count += pkts;
             let count = self.bytes as *mut u64;
             *count += bytes;
+            let count = self.pkts as *mut u64;
+            *count += pkts;
+            *count
         }
     }
 
-    pub fn sub(&self, pkts: u64, bytes: u64) {
+    pub fn sub(&mut self, pkts: u64, bytes: u64) -> u64 {
         unsafe {
-            let count = self.pkts as *mut u64;
-            *count -= pkts;
             let count = self.bytes as *mut u64;
             *count -= bytes;
+            let count = self.pkts as *mut u64;
+            *count -= pkts;
+            *count
         }
     }
 
@@ -133,25 +137,42 @@ pub struct CounterArray {
 }
 
 impl CounterArray {
-    pub fn incr(&self, index: usize) {
-        self.add(index, 1)
-    }
-
-    pub fn decr(&self, index: usize) {
-        self.sub(index, 1)
-    }
-
-    pub fn add(&self, index: usize, val: u64) {
+    pub fn get(&self, index: usize) -> u64 {
         unsafe {
             let count = self.array[index] as *mut u64;
-            *count += val
+            *count
         }
     }
 
-    pub fn sub(&self, index: usize, val: u64) {
+    pub fn set(&mut self, index: usize, val: u64) -> u64 {
         unsafe {
             let count = self.array[index] as *mut u64;
-            *count -= val
+            *count = val;
+            *count
+        }
+    }
+
+    pub fn incr(&mut self, index: usize) -> u64 {
+        self.add(index, 1)
+    }
+
+    pub fn decr(&mut self, index: usize) -> u64 {
+        self.sub(index, 1)
+    }
+
+    pub fn add(&mut self, index: usize, val: u64) -> u64 {
+        unsafe {
+            let count = self.array[index] as *mut u64;
+            *count += val;
+            *count
+        }
+    }
+
+    pub fn sub(&mut self, index: usize, val: u64) -> u64 {
+        unsafe {
+            let count = self.array[index] as *mut u64;
+            *count -= val;
+            *count
         }
     }
 

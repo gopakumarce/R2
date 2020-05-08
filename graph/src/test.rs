@@ -231,6 +231,7 @@ fn single_thread() {
         name: rx.name(),
         next_names: rx.next_names(0),
         cntrs: GnodeCntrs::new(&rx.name(), &mut counters),
+        perf: Perf::new(&rx.name(), &mut counters),
     };
     graph.add(rx.clone(&mut counters, log.clone()), init);
 
@@ -238,6 +239,7 @@ fn single_thread() {
         name: tx.name(),
         next_names: tx.next_names(),
         cntrs: GnodeCntrs::new(&tx.name(), &mut counters),
+        perf: Perf::new(&tx.name(), &mut counters),
     };
     graph.add(tx.clone(&mut counters, log.clone()), init);
 
@@ -245,6 +247,7 @@ fn single_thread() {
         name: print.name(),
         next_names: print.next_names(),
         cntrs: GnodeCntrs::new(&print.name(), &mut counters),
+        perf: Perf::new(&print.name(), &mut counters),
     };
     graph.add(print.clone(&mut counters, log), init);
 
@@ -287,6 +290,7 @@ fn multi_thread() {
             name: rx.name(),
             next_names: rx.next_names(0),
             cntrs: GnodeCntrs::new(&rx.name(), &mut counters),
+            perf: Perf::new(&rx.name(), &mut counters),
         };
         graph.add(rx.clone(&mut counters, log.clone()), init);
         rx_vec.push(rx);
@@ -296,6 +300,7 @@ fn multi_thread() {
         name: tx.name(),
         next_names: tx.next_names(),
         cntrs: GnodeCntrs::new(&tx.name(), &mut counters),
+        perf: Perf::new(&tx.name(), &mut counters),
     };
     graph.add(tx.clone(&mut counters, log.clone()), init);
 
@@ -303,6 +308,7 @@ fn multi_thread() {
         name: print.name(),
         next_names: print.next_names(),
         cntrs: GnodeCntrs::new(&print.name(), &mut counters),
+        perf: Perf::new(&print.name(), &mut counters),
     };
     graph.add(print.clone(&mut counters, log.clone()), init);
 
