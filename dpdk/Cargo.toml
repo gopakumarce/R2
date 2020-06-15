@@ -1,0 +1,9 @@
+[package]
+name = "dpdk"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+build = "build.rs"
+
+[dependencies]
+

@@ -10,6 +10,7 @@ members = [
     "perf",
     "api",
     "msg",
+    "dpdk",
     "main",
     "unix/socket",
     "unix/epoll",
