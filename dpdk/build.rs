@@ -21,6 +21,7 @@ fn main() {
         &out, "dpdk/build/lib/"
     );
     println!("cargo:rustc-link-lib=static=rte_eal");
+    println!("cargo:rustc-link-lib=static=rte_kvargs");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=build.sh");
 }
