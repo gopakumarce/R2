@@ -12,6 +12,7 @@ members = [
     "msg",
     "dpdk",
     "main",
+    "ffis/dpdk",
     "unix/socket",
     "unix/epoll",
     "unix/efd",

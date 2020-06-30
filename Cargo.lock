@@ -123,6 +123,14 @@ dependencies = [
 name = "dpdk"
 version = "0.1.0"
 dependencies = [
+ "dpdk-ffi 0.1.0",
+ "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "dpdk-ffi"
+version = "0.1.0"
+dependencies = [
  "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 

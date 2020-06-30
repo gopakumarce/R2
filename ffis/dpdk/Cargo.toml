@@ -1,9 +1,9 @@
 [package]
-name = "dpdk"
+name = "dpdk-ffi"
 version = "0.1.0"
 authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
 edition = "2018"
+build = "build.rs"
 
 [dependencies]
 libc = "0.2.0"
-dpdk-ffi = { path = "../ffis/dpdk" }
