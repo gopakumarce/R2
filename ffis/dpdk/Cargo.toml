@@ -5,5 +5,8 @@ authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
 edition = "2018"
 build = "build.rs"
 
+[lib]
+doctest = false
+
 [dependencies]
 libc = "0.2.0"
