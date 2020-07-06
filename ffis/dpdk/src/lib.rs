@@ -3,4 +3,3 @@
 #![allow(non_snake_case)]
 
 include!("bindgen/include/lib.rs");
-
