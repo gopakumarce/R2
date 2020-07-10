@@ -7,3 +7,6 @@
 
 3. now run ./bindgen.sh
 
+Manual fixing needed post bindgen:
+
+1. pub struct rte_ether_addr { -> remove/comment out the repr(align) against this structure
