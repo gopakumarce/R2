@@ -9039,7 +9039,6 @@ extern "C" {
     pub fn rte_rand_max(upper_bound: u64) -> u64;
 }
 #[repr(C)]
-//#[repr(align(2))]
 #[derive(Debug, Copy, Clone)]
 pub struct rte_ether_addr {
     pub addr_bytes: [u8; 6usize],
@@ -9053,7 +9052,7 @@ fn bindgen_test_layout_rte_ether_addr() {
     );
     assert_eq!(
         ::std::mem::align_of::<rte_ether_addr>(),
-        2usize,
+        1usize,
         concat!("Alignment of ", stringify!(rte_ether_addr))
     );
     assert_eq!(
@@ -15325,7 +15324,7 @@ fn bindgen_test_layout_rte_flow_item_icmp6_nd_opt_sla_eth() {
     );
     assert_eq!(
         ::std::mem::align_of::<rte_flow_item_icmp6_nd_opt_sla_eth>(),
-        2usize,
+        1usize,
         concat!(
             "Alignment of ",
             stringify!(rte_flow_item_icmp6_nd_opt_sla_eth)
@@ -15401,7 +15400,7 @@ fn bindgen_test_layout_rte_flow_item_icmp6_nd_opt_tla_eth() {
     );
     assert_eq!(
         ::std::mem::align_of::<rte_flow_item_icmp6_nd_opt_tla_eth>(),
-        2usize,
+        1usize,
         concat!(
             "Alignment of ",
             stringify!(rte_flow_item_icmp6_nd_opt_tla_eth)
@@ -20478,7 +20477,7 @@ fn bindgen_test_layout_rte_eth_mac_vlan_flow() {
     );
     assert_eq!(
         ::std::mem::align_of::<rte_eth_mac_vlan_flow>(),
-        2usize,
+        1usize,
         concat!("Alignment of ", stringify!(rte_eth_mac_vlan_flow))
     );
     assert_eq!(
