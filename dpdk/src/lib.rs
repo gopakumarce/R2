@@ -1,8 +1,9 @@
 use dpdk_ffi::{
-    rte_dev_iterator, rte_dev_probe, rte_eal_init, rte_eth_conf, rte_eth_dev_configure,
-    rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init, rte_eth_iterator_next,
-    rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup, rte_eth_tx_queue_setup, rte_mempool,
-    rte_pktmbuf_pool_create, RTE_MAX_ETHPORTS, RTE_MEMPOOL_CACHE_MAX_SIZE, SOCKET_ID_ANY,
+    rte_dev_iterator, rte_dev_probe, rte_eal_init, rte_eal_mp_remote_launch, rte_eth_conf,
+    rte_eth_dev_configure, rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init,
+    rte_eth_iterator_next, rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup,
+    rte_eth_tx_queue_setup, rte_mempool, rte_pktmbuf_pool_create,
+    rte_rmt_call_master_t_SKIP_MASTER, RTE_MAX_ETHPORTS, RTE_MEMPOOL_CACHE_MAX_SIZE, SOCKET_ID_ANY,
 };
 use std::ffi::CString;
 use std::mem;
@@ -45,6 +46,20 @@ fn dpdk_init(_mem_sz: usize, _ncores: usize) -> Result<(), usize> {
             return Err(0);
         }
         Ok(())
+    }
+}
+
+extern "C" fn dpdk_thread(arg: *mut core::ffi::c_void) -> i32 {
+    0
+}
+
+fn dpdk_launch() {
+    unsafe {
+        rte_eal_mp_remote_launch(
+            Some(dpdk_thread),
+            0 as *mut core::ffi::c_void,
+            rte_rmt_call_master_t_SKIP_MASTER,
+        );
     }
 }
 
