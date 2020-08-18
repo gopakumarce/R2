@@ -1,25 +1,25 @@
-use crossbeam_queue::ArrayQueue;
 use dpdk_ffi::{
-    rte_dev_iterator, rte_dev_probe, rte_eal_init, rte_eal_mp_remote_launch, rte_eth_conf,
-    rte_eth_dev_configure, rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init,
-    rte_eth_iterator_next, rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup,
-    rte_eth_tx_queue_setup, rte_mempool, rte_pktmbuf_pool_create,
+    dpdk_rx_one, rte_dev_iterator, rte_dev_probe, rte_eal_init, rte_eal_mp_remote_launch,
+    rte_eth_conf, rte_eth_dev_configure, rte_eth_dev_socket_id, rte_eth_dev_start,
+    rte_eth_iterator_init, rte_eth_iterator_next, rte_eth_rx_mq_mode_ETH_MQ_RX_NONE,
+    rte_eth_rx_queue_setup, rte_eth_tx_queue_setup, rte_mbuf, rte_mempool, rte_pktmbuf_pool_create,
     rte_rmt_call_master_t_SKIP_MASTER, RTE_MAX_ETHPORTS, RTE_MEMPOOL_CACHE_MAX_SIZE, SOCKET_ID_ANY,
 };
 use graph::Driver;
 use packet::BoxPkt;
 use std::ffi::CString;
 use std::mem;
-use std::sync::Arc;
 
 // TODO: These are to be made configurable at some point
 const N_RX_DESC: u16 = 128;
 const N_TX_DESC: u16 = 128;
 
+fn pkt_to_mbuf(pkt: &mut BoxPkt) -> *mut rte_mbuf {
+    unsafe { 0 as *mut rte_mbuf }
+}
+
 pub struct Dpdk {
-    port: u16,
-    recv_q: Arc<ArrayQueue<BoxPkt>>,
-    xmit_q: Arc<ArrayQueue<BoxPkt>>,
+    port: usize,
 }
 
 impl Driver for Dpdk {
@@ -27,7 +27,10 @@ impl Driver for Dpdk {
         None
     }
 
-    fn recvmsg(&self, pkt: &mut BoxPkt) {}
+    fn recvmsg(&self, pkt: &mut BoxPkt) {
+        let mut mbuf = pkt_to_mbuf(pkt);
+        let nrx = dpdk_rx_one(self.port, 0, &mut mbuf);
+    }
 
     fn sendmsg(&self, pkt: &BoxPkt) -> usize {
         0
