@@ -12,6 +12,7 @@ use msg::EpollAddMsg;
 use msg::{ClassAddMsg, GnodeAddMsg};
 use msg::{Curves, Sc};
 use perf::Perf;
+use socket::RawSock;
 use std::net::Ipv4Addr;
 
 pub struct InterfaceApis {
@@ -149,7 +150,17 @@ pub fn create_interface_node(
     r2.ifd.last_thread = (thread + 1) % r2.nthreads;
     let thread_mask = 1 << thread;
     let efd = r2.threads[thread].efd.clone();
-    let intf = match IfNode::new(&mut r2.counters, thread_mask, efd, interface.clone()) {
+    let sock = match RawSock::new(ifname, true) {
+        Ok(sock) => sock,
+        Err(errno) => return Err(-errno),
+    };
+    let intf = match IfNode::new(
+        &mut r2.counters,
+        thread_mask,
+        efd,
+        interface.clone(),
+        Arc::new(sock),
+    ) {
         Ok(intf) => intf,
         Err(errno) => return Err(-errno),
     };

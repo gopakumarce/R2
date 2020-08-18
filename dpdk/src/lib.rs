@@ -12,6 +12,10 @@ use std::mem;
 const N_RX_DESC: u16 = 128;
 const N_TX_DESC: u16 = 128;
 
+pub struct Dpdk {
+    port: u16,
+}
+
 pub enum port_init_err {
     PROBE_FAIL,
     CONFIG_FAIL,

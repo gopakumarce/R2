@@ -1,8 +1,10 @@
 use counters::flavors::{Counter, CounterType};
 use counters::Counters;
 use crossbeam_queue::ArrayQueue;
+use dpdk::Dpdk;
 use efd::Efd;
 use fwd::intf::Interface;
+use graph::Driver;
 use graph::{Dispatch, Gclient, VEC_SIZE};
 use log::Logger;
 use msg::R2Msg;
@@ -38,7 +40,7 @@ pub struct IfNode {
     thread_mask: u64,
     intf: Arc<Interface>,
     sched: Hfsc,
-    driver: Arc<RawSock>,
+    driver: Arc<dyn Driver + Send>,
     sched_fail: Counter,
     threadq_fail: Counter,
     thread_q: Arc<ArrayQueue<BoxPkt>>,
@@ -54,29 +56,25 @@ impl IfNode {
         thread_mask: u64,
         efd: Arc<Efd>,
         intf: Arc<Interface>,
+        driver: Arc<dyn Driver + Send>,
     ) -> Result<Self, i32> {
         let name = names::rx_tx(intf.ifindex);
-        match RawSock::new(&intf.ifname, true) {
-            Ok(sock) => {
-                // By default the scheduler is HFSC today, eventually there will be other options
-                let sched = sched::hfsc::Hfsc::new(common::MB!(10 * 1024));
-                let sched_fail = Counter::new(counters, &name, CounterType::Error, "sched_fail");
-                let threadq_fail =
-                    Counter::new(counters, &name, CounterType::Error, "threadq_fail");
-                Ok(IfNode {
-                    name,
-                    thread_mask,
-                    intf,
-                    sched,
-                    driver: Arc::new(sock),
-                    sched_fail,
-                    threadq_fail,
-                    thread_q: Arc::new(ArrayQueue::new(VEC_SIZE)),
-                    thread_wakeup: efd,
-                })
-            }
-            Err(errno) => Err(errno),
-        }
+
+        // By default the scheduler is HFSC today, eventually there will be other options
+        let sched = sched::hfsc::Hfsc::new(common::MB!(10 * 1024));
+        let sched_fail = Counter::new(counters, &name, CounterType::Error, "sched_fail");
+        let threadq_fail = Counter::new(counters, &name, CounterType::Error, "threadq_fail");
+        Ok(IfNode {
+            name,
+            thread_mask,
+            intf,
+            sched,
+            driver,
+            sched_fail,
+            threadq_fail,
+            thread_q: Arc::new(ArrayQueue::new(VEC_SIZE)),
+            thread_wakeup: efd,
+        })
     }
 
     pub fn name(&self) -> String {
@@ -93,7 +91,7 @@ impl IfNode {
     }
 
     pub fn fd(&self) -> Option<i32> {
-        Some(self.driver.fd())
+        self.driver.fd()
     }
 }
 
