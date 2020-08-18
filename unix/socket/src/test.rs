@@ -6,9 +6,10 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
+use std::time;
 
-const NUM_PKTS: usize = 10;
-const NUM_PART: usize = 20;
+const NUM_PKTS: usize = 100;
+const NUM_PART: usize = 200;
 const MAX_PACKET: usize = 1500;
 const PARTICLE_SZ: usize = 512;
 
@@ -119,10 +120,12 @@ fn read_write() {
     let data: Vec<u8> = (0..MAX_PACKET).map(|x| (x % 256) as u8).collect();
     // Send data as multi particle pkt
     let mut pool = packet_pool("sock_read_write_tx", PARTICLE_SZ);
-    let mut pkt = pool.pkt(0).unwrap();
-    assert!(pkt.append(&mut *pool, &data[0..]));
     while wait.load(Ordering::Relaxed) == 0 {
-        assert_eq!(raw.sendmsg(&mut pkt), MAX_PACKET);
+        let mut pkt = pool.pkt(0).unwrap();
+        assert!(pkt.append(&mut *pool, &data[0..]));
+        assert_eq!(raw.sendmsg(pkt), MAX_PACKET);
+        let wait = time::Duration::from_millis(1);
+        thread::sleep(wait)
     }
 
     handler.unwrap().join().unwrap();

@@ -36,7 +36,7 @@ impl Driver for RawSock {
         }
     }
 
-    fn sendmsg(&self, pkt: &BoxPkt) -> usize {
+    fn sendmsg(&self, pkt: BoxPkt) -> usize {
         unsafe {
             let slices = pkt.slices();
             let iov: libc::iovec = mem::MaybeUninit::uninit().assume_init();

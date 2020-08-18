@@ -125,7 +125,7 @@ impl Gclient<R2Msg> for IfNode {
                 // TODO: We have the scheduler, but we havent figured out the packet queueing
                 // model. Till then we cant really put the scheduler to use
                 if !self.sched.has_classes() {
-                    self.driver.sendmsg(&p);
+                    self.driver.sendmsg(p);
                 }
             } else if self.thread_q.push(p).is_err() {
                 self.threadq_fail.incr();
@@ -136,7 +136,7 @@ impl Gclient<R2Msg> for IfNode {
         if owner_thread {
             while let Ok(p) = self.thread_q.pop() {
                 if !self.sched.has_classes() {
-                    self.driver.sendmsg(&p);
+                    self.driver.sendmsg(p);
                 }
             }
         }

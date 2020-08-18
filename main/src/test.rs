@@ -195,7 +195,7 @@ fn packet_send(done: Arc<AtomicUsize>) -> std::thread::JoinHandle<()> {
                 assert!(pkt.append(&mut *pool, &ETH_HDR_IPV4));
                 let data: Vec<u8> = vec![0; DATA_LEN - 14];
                 assert!(pkt.append(&mut *pool, &data));
-                assert_eq!(raw.sendmsg(&pkt), DATA_LEN);
+                assert_eq!(raw.sendmsg(pkt), DATA_LEN);
                 while let Ok(p) = queue.pop() {
                     pool.free(p);
                 }

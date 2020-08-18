@@ -17,7 +17,7 @@ const GRAPH_INIT_SZ: usize = 1024;
 pub const VEC_SIZE: usize = 256;
 
 pub trait Driver: Sync {
-    fn sendmsg(&self, pkt: &BoxPkt) -> usize;
+    fn sendmsg(&self, pkt: BoxPkt) -> usize;
     fn recvmsg(&self, pkt: &mut BoxPkt);
     fn fd(&self) -> Option<i32>;
 }
