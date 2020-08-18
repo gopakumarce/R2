@@ -1,3 +1,4 @@
+use crossbeam_queue::ArrayQueue;
 use dpdk_ffi::{
     rte_dev_iterator, rte_dev_probe, rte_eal_init, rte_eal_mp_remote_launch, rte_eth_conf,
     rte_eth_dev_configure, rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init,
@@ -5,8 +6,11 @@ use dpdk_ffi::{
     rte_eth_tx_queue_setup, rte_mempool, rte_pktmbuf_pool_create,
     rte_rmt_call_master_t_SKIP_MASTER, RTE_MAX_ETHPORTS, RTE_MEMPOOL_CACHE_MAX_SIZE, SOCKET_ID_ANY,
 };
+use graph::Driver;
+use packet::BoxPkt;
 use std::ffi::CString;
 use std::mem;
+use std::sync::Arc;
 
 // TODO: These are to be made configurable at some point
 const N_RX_DESC: u16 = 128;
@@ -14,8 +18,21 @@ const N_TX_DESC: u16 = 128;
 
 pub struct Dpdk {
     port: u16,
+    recv_q: Arc<ArrayQueue<BoxPkt>>,
+    xmit_q: Arc<ArrayQueue<BoxPkt>>,
 }
 
+impl Driver for Dpdk {
+    fn fd(&self) -> Option<i32> {
+        None
+    }
+
+    fn recvmsg(&self, pkt: &mut BoxPkt) {}
+
+    fn sendmsg(&self, pkt: &BoxPkt) -> usize {
+        0
+    }
+}
 pub enum port_init_err {
     PROBE_FAIL,
     CONFIG_FAIL,

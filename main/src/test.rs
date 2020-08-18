@@ -2,6 +2,7 @@ use super::ipv4::add_route;
 use super::*;
 use fwd::EthMacAddMsg;
 use fwd::EthMacRaw;
+use graph::Driver;
 use packet::{BoxPkt, PacketPool, PktsHeap};
 use socket::RawSock;
 use std::net::Ipv4Addr;
