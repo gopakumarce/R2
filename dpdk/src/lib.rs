@@ -38,7 +38,6 @@ impl PktsDpdk {
     /// This API deals with constructing packets and particles starting from raw pointers,
     /// hence this is marked unsafe
     pub fn new(
-        dpdk_pool: *mut rte_mempool,
         queue: Arc<ArrayQueue<BoxPkt>>,
         counters: &mut Counters,
         num_pkts: usize,
@@ -50,6 +49,7 @@ impl PktsDpdk {
         let particles = VecDeque::with_capacity(parts_left);
         let pkts = VecDeque::with_capacity(num_pkts);
         let alloc_fail = Counter::new(counters, "PKTS_HEAP", CounterType::Error, "PktAllocFail");
+        let dpdk_pool = dpdk_buffer_init(num_parts as u32, particle_sz as u16);
         let mut pool = PktsDpdk {
             dpdk_pool,
             alloc_fail,
@@ -74,12 +74,10 @@ impl PktsDpdk {
             }
 
             for _ in 0..parts_left {
-                let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
-                let raw: *mut u8 = alloc(lraw);
                 let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
                 let part: *mut u8 = alloc(lpart);
                 pool.particles
-                    .push_front(BoxPart::new(part, raw, particle_sz));
+                    .push_front(BoxPart::new(part, 0 as *mut u8, particle_sz));
             }
         }
         pool
@@ -197,8 +195,7 @@ fn dpdk_launch() {
     }
 }
 
-fn dpdk_buffer_init(total_mem: usize, priv_sz: usize, buf_sz: usize) -> *mut rte_mempool {
-    let nbufs = (total_mem / buf_sz) as u32;
+fn dpdk_buffer_init(nbufs: u32, buf_sz: u16) -> *mut rte_mempool {
     let cstr = CString::new("dpdk_mbufs").unwrap();
     let name = cstr.as_ptr();
     mem::forget(cstr);
@@ -207,8 +204,8 @@ fn dpdk_buffer_init(total_mem: usize, priv_sz: usize, buf_sz: usize) -> *mut rte
             name,
             nbufs,
             RTE_MEMPOOL_CACHE_MAX_SIZE,
-            priv_sz as u16,
-            buf_sz as u16,
+            0,
+            buf_sz,
             SOCKET_ID_ANY,
         )
     }
