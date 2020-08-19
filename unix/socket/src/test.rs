@@ -97,8 +97,7 @@ fn read_write() {
         };
         assert!(raw.fd > 0);
 
-        let mut pkt = pool.pkt(0).unwrap();
-        raw.recvmsg(&mut pkt);
+        let mut pkt = raw.recvmsg(&mut *pool, 0).unwrap();
         let pktlen = pkt.len();
         assert_eq!(MAX_PACKET, pktlen);
         let (buf, len) = match pkt.data(0) {

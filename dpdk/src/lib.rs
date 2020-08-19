@@ -7,17 +7,13 @@ use dpdk_ffi::{
     RTE_MEMPOOL_CACHE_MAX_SIZE, SOCKET_ID_ANY,
 };
 use graph::Driver;
-use packet::BoxPkt;
+use packet::{BoxPkt, PacketPool};
 use std::ffi::CString;
 use std::mem;
 
 // TODO: These are to be made configurable at some point
 const N_RX_DESC: u16 = 128;
 const N_TX_DESC: u16 = 128;
-
-fn pkt_to_mbuf(pkt: &BoxPkt) -> *mut rte_mbuf {
-    unsafe { 0 as *mut rte_mbuf }
-}
 
 pub struct Dpdk {
     port: usize,
@@ -28,16 +24,21 @@ impl Driver for Dpdk {
         None
     }
 
-    fn recvmsg(&self, pkt: &mut BoxPkt) {
-        let mut mbuf = pkt_to_mbuf(pkt);
-        let nrx = dpdk_rx_one(self.port, 0, &mut mbuf);
+    fn recvmsg(&self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt> {
+        unsafe {
+            let mut mbuf = mem::MaybeUninit::uninit().assume_init();
+            let nrx = dpdk_rx_one(self.port, 0, &mut mbuf);
+            None
+        }
     }
 
     fn sendmsg(&self, pkt: BoxPkt) -> usize {
-        let len = pkt.len();
-        let mut mbuf = pkt_to_mbuf(&pkt);
-        dpdk_tx_one(self.port, 0, &mut mbuf);
-        len
+        unsafe {
+            let len = pkt.len();
+            let mut mbuf = mem::MaybeUninit::uninit().assume_init();
+            dpdk_tx_one(self.port, 0, &mut mbuf);
+            len
+        }
     }
 }
 pub enum port_init_err {

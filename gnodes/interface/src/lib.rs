@@ -1,7 +1,6 @@
 use counters::flavors::{Counter, CounterType};
 use counters::Counters;
 use crossbeam_queue::ArrayQueue;
-use dpdk::Dpdk;
 use efd::Efd;
 use fwd::intf::Interface;
 use graph::Driver;
@@ -11,7 +10,6 @@ use msg::R2Msg;
 use names::l2_eth_decap;
 use packet::BoxPkt;
 use sched::hfsc::Hfsc;
-use socket::RawSock;
 use std::sync::Arc;
 
 #[derive(Copy, Clone)]
@@ -148,12 +146,11 @@ impl Gclient<R2Msg> for IfNode {
         // Do packet Rx, only on the thread this driver is pinned to
         if owner_thread {
             for _ in 0..VEC_SIZE {
-                let pkt = vectors.pool.pkt(self.intf.headroom);
+                let pkt = self.driver.recvmsg(vectors.pool, self.intf.headroom);
                 if pkt.is_none() {
                     break;
                 }
                 let mut pkt = pkt.unwrap();
-                self.driver.recvmsg(&mut pkt);
                 if pkt.len() == 0 {
                     break;
                 }

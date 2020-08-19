@@ -215,8 +215,7 @@ fn packet_rcv(done: Arc<AtomicUsize>) -> std::thread::JoinHandle<()> {
             let (mut pool, queue) = packet_pool("main_pkt_recv");
             let mut rcv = 0;
             while rcv < 10 {
-                let mut pkt = pool.pkt(0).unwrap();
-                raw.recvmsg(&mut pkt);
+                let pkt = raw.recvmsg(&mut *pool, 0).unwrap();
                 if pkt.len() != 0 {
                     assert_eq!(pkt.len(), DATA_LEN);
                     rcv += 1;

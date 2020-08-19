@@ -1,5 +1,5 @@
 use graph::Driver;
-use packet::BoxPkt;
+use packet::{BoxPkt, PacketPool};
 use std::ffi::CString;
 use std::mem;
 use std::ptr;
@@ -13,7 +13,12 @@ impl Driver for RawSock {
         Some(self.fd)
     }
 
-    fn recvmsg(&self, pkt: &mut BoxPkt) {
+    fn recvmsg(&self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt> {
+        let pkt = (*pool).pkt(headroom);
+        if pkt.is_none() {
+            return None;
+        }
+        let mut pkt = pkt.unwrap();
         unsafe {
             let buf = pkt.data_raw();
             let mut iov: libc::iovec = mem::MaybeUninit::uninit().assume_init();
@@ -33,6 +38,7 @@ impl Driver for RawSock {
             if rv > 0 {
                 assert_eq!(pkt.move_tail(rv), rv);
             }
+            Some(pkt)
         }
     }
 

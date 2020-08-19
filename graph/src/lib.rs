@@ -18,7 +18,7 @@ pub const VEC_SIZE: usize = 256;
 
 pub trait Driver: Sync {
     fn sendmsg(&self, pkt: BoxPkt) -> usize;
-    fn recvmsg(&self, pkt: &mut BoxPkt);
+    fn recvmsg(&self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt>;
     fn fd(&self) -> Option<i32>;
 }
 
