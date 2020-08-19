@@ -1,3 +1,6 @@
+use counters::flavors::{Counter, CounterType};
+use counters::Counters;
+use crossbeam_queue::ArrayQueue;
 use dpdk_ffi::{
     dpdk_rx_one, dpdk_tx_one, rte_dev_iterator, rte_dev_probe, rte_eal_init,
     rte_eal_mp_remote_launch, rte_eth_conf, rte_eth_dev_configure, rte_eth_dev_socket_id,
@@ -7,13 +10,115 @@ use dpdk_ffi::{
     RTE_MEMPOOL_CACHE_MAX_SIZE, SOCKET_ID_ANY,
 };
 use graph::Driver;
-use packet::{BoxPkt, PacketPool};
+use packet::{BoxPart, BoxPkt, PacketPool};
+use std::alloc::alloc;
+use std::alloc::Layout;
+use std::collections::VecDeque;
 use std::ffi::CString;
-use std::mem;
+use std::{mem, sync::Arc};
 
 // TODO: These are to be made configurable at some point
 const N_RX_DESC: u16 = 128;
 const N_TX_DESC: u16 = 128;
+
+pub struct PktsDpdk {
+    dpdk_pool: *mut rte_mempool,
+    alloc_fail: Counter,
+    pkts: VecDeque<BoxPkt>,
+    particles: VecDeque<BoxPart>,
+    particle_sz: usize,
+}
+
+unsafe impl Send for PktsDpdk {}
+
+impl PktsDpdk {
+    const PARTICLE_ALIGN: usize = 16;
+
+    /// #Safety
+    /// This API deals with constructing packets and particles starting from raw pointers,
+    /// hence this is marked unsafe
+    pub fn new(
+        dpdk_pool: *mut rte_mempool,
+        queue: Arc<ArrayQueue<BoxPkt>>,
+        counters: &mut Counters,
+        num_pkts: usize,
+        num_parts: usize,
+        particle_sz: usize,
+    ) -> Self {
+        assert!(num_parts >= num_pkts);
+        let parts_left = num_parts - num_pkts;
+        let particles = VecDeque::with_capacity(parts_left);
+        let pkts = VecDeque::with_capacity(num_pkts);
+        let alloc_fail = Counter::new(counters, "PKTS_HEAP", CounterType::Error, "PktAllocFail");
+        let mut pool = PktsDpdk {
+            dpdk_pool,
+            alloc_fail,
+            pkts,
+            particles,
+            particle_sz,
+        };
+
+        unsafe {
+            for _ in 0..num_pkts {
+                let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
+                let raw: *mut u8 = alloc(lraw);
+                let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
+                let part: *mut u8 = alloc(lpart);
+                let lpkt = Layout::from_size_align(BoxPkt::size(), BoxPkt::align()).unwrap();
+                let pkt: *mut u8 = alloc(lpkt);
+                pool.pkts.push_front(BoxPkt::new(
+                    pkt,
+                    BoxPart::new(part, raw, particle_sz),
+                    queue.clone(),
+                ));
+            }
+
+            for _ in 0..parts_left {
+                let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
+                let raw: *mut u8 = alloc(lraw);
+                let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
+                let part: *mut u8 = alloc(lpart);
+                pool.particles
+                    .push_front(BoxPart::new(part, raw, particle_sz));
+            }
+        }
+        pool
+    }
+}
+
+impl PacketPool for PktsDpdk {
+    fn pkt(&mut self, headroom: usize) -> Option<BoxPkt> {
+        if let Some(mut pkt) = self.pkts.pop_front() {
+            pkt.reinit(headroom);
+            Some(pkt)
+        } else {
+            self.alloc_fail.incr();
+            None
+        }
+    }
+
+    fn particle(&mut self, headroom: usize) -> Option<BoxPart> {
+        if let Some(mut part) = self.particles.pop_front() {
+            part.reinit(headroom);
+            Some(part)
+        } else {
+            self.alloc_fail.incr();
+            None
+        }
+    }
+
+    fn free_pkt(&mut self, pkt: BoxPkt) {
+        self.pkts.push_front(pkt);
+    }
+
+    fn free_part(&mut self, part: BoxPart) {
+        self.particles.push_front(part);
+    }
+
+    fn particle_sz(&self) -> usize {
+        self.particle_sz
+    }
+}
 
 pub struct Dpdk {
     port: usize,

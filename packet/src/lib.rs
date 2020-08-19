@@ -53,6 +53,12 @@ impl BoxPart {
     }
 }
 
+/// By default because BoxPart is a pointer to a Particle, it wont be Send because
+/// Rust will not allow pointers/addresses to be send across threads. We override
+/// it here because we have the _guarantee_ that these addresses are valid across all
+/// threads in R2
+unsafe impl Send for BoxPart {}
+
 impl Drop for BoxPart {
     // A particle is never expected to go out of scope without
     // being attached to a packet. The packet drop() will free
@@ -217,8 +223,6 @@ pub struct PktsHeap {
     particles: VecDeque<BoxPart>,
     particle_sz: usize,
 }
-
-unsafe impl Send for PktsHeap {}
 
 /// A from-heap packet/particle pool, the pool is created with a specification of the
 /// number of packets, number of particles and max-size of each particle

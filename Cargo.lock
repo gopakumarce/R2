@@ -123,6 +123,8 @@ dependencies = [
 name = "dpdk"
 version = "0.1.0"
 dependencies = [
+ "counters 0.1.0",
+ "crossbeam-queue 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "dpdk-ffi 0.1.0",
  "graph 0.1.0",
  "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
