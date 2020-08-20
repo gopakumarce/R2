@@ -7,7 +7,7 @@ use dpdk_ffi::{
     rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init, rte_eth_iterator_next,
     rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup, rte_eth_tx_queue_setup, rte_mbuf,
     rte_mempool, rte_pktmbuf_pool_create, rte_rmt_call_master_t_SKIP_MASTER, RTE_MAX_ETHPORTS,
-    RTE_MEMPOOL_CACHE_MAX_SIZE, SOCKET_ID_ANY,
+    RTE_MEMPOOL_CACHE_MAX_SIZE, RTE_PKTMBUF_HEADROOM, SOCKET_ID_ANY,
 };
 use graph::Driver;
 use packet::{BoxPart, BoxPkt, PacketPool};
@@ -82,36 +82,46 @@ impl PktsDpdk {
         }
         pool
     }
+
+    fn mbuf_to_pkt(&mut self, mbuf: *mut rte_mbuf, headroom: usize) -> Option<BoxPkt> {
+        if let Some(mut pkt) = self.pkts.pop_front() {
+            unsafe {
+                pkt.reinit_unsafe(headroom, dpdk_mtod(mbuf), self.particle_sz);
+            }
+            Some(pkt)
+        } else {
+            self.alloc_fail.incr();
+            None
+        }
+    }
+
+    fn mbuf_to_particle(&mut self, mbuf: *mut rte_mbuf, headroom: usize) -> Option<BoxPart> {
+        if let Some(mut part) = self.particles.pop_front() {
+            unsafe {
+                part.reinit_unsafe(headroom, dpdk_mtod(mbuf), self.particle_sz);
+            }
+            Some(part)
+        } else {
+            self.alloc_fail.incr();
+            None
+        }
+    }
 }
 
 impl PacketPool for PktsDpdk {
     fn pkt(&mut self, headroom: usize) -> Option<BoxPkt> {
+        assert!(headroom as u32 <= RTE_PKTMBUF_HEADROOM);
         if let Some(mut mbuf) = dpdk_mbuf_alloc(self.dpdk_pool) {
-            if let Some(mut pkt) = self.pkts.pop_front() {
-                unsafe {
-                    pkt.reinit_unsafe(headroom, dpdk_mtod(mbuf), self.particle_sz);
-                }
-                Some(pkt)
-            } else {
-                self.alloc_fail.incr();
-                None
-            }
+            self.mbuf_to_pkt(mbuf, headroom)
         } else {
             None
         }
     }
 
     fn particle(&mut self, headroom: usize) -> Option<BoxPart> {
+        assert!(headroom as u32 <= RTE_PKTMBUF_HEADROOM);
         if let Some(mut mbuf) = dpdk_mbuf_alloc(self.dpdk_pool) {
-            if let Some(mut part) = self.particles.pop_front() {
-                unsafe {
-                    part.reinit_unsafe(headroom, dpdk_mtod(mbuf), self.particle_sz);
-                }
-                Some(part)
-            } else {
-                self.alloc_fail.incr();
-                None
-            }
+            self.mbuf_to_particle(mbuf, headroom)
         } else {
             None
         }
