@@ -43,13 +43,26 @@ impl BoxPart {
         BoxPart(part)
     }
 
-    // reinit is called on a particle thats was used before and given back to the
-    // particle pool and now being allocated again from the pool
-    pub fn reinit(&mut self, headroom: usize) {
-        assert!(headroom <= self.raw.len());
+    fn reinit_fields(&mut self, headroom: usize) {
         self.head = headroom;
         self.tail = headroom;
         self.next = None;
+    }
+
+    // reinit is called on a particle thats was used before and given back to the
+    // particle pool and now being allocated again from the pool
+    pub fn reinit(&mut self, headroom: usize) {
+        self.reinit_fields(headroom);
+        assert!(headroom <= self.raw.len());
+    }
+
+    // reinit is called on a particle thats was used before and given back to the
+    // particle pool and now being allocated again from the pool. This unsafe version
+    // also modifies the particles raw data pointer
+    pub unsafe fn reinit_unsafe(&mut self, headroom: usize, raw: *mut u8, rlen: usize) {
+        self.reinit_fields(headroom);
+        self.raw = from_raw_parts_mut(raw, rlen);
+        assert!(headroom <= self.raw.len());
     }
 }
 
@@ -124,9 +137,7 @@ impl BoxPkt {
         }
     }
 
-    // reinit() is called on packets which were previously used and returned to the packet pool,
-    // and now its being allocated from the pool again
-    pub fn reinit(&mut self, headroom: usize) {
+    fn reinit_fields(&mut self, headroom: usize) {
         self.length = 0;
         self.l2 = 0;
         self.l2_len = 0;
@@ -136,7 +147,21 @@ impl BoxPkt {
         self.in_ifindex = 0;
         self.out_ifindex = 0;
         self.out_l3addr = ZERO_IP;
+    }
+
+    // reinit() is called on packets which were previously used and returned to the packet pool,
+    // and now its being allocated from the pool again
+    pub fn reinit(&mut self, headroom: usize) {
+        self.reinit_fields(headroom);
         self.particle.reinit(headroom);
+    }
+
+    // reinit() is called on packets which were previously used and returned to the packet pool,
+    // and now its being allocated from the pool again. This unsafe version also assigns a new
+    // address to the particle's raw data area
+    pub unsafe fn reinit_unsafe(&mut self, headroom: usize, raw: *mut u8, rlen: usize) {
+        self.reinit_fields(headroom);
+        self.particle.reinit_unsafe(headroom, raw, rlen);
     }
 }
 

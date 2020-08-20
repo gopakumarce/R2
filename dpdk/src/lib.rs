@@ -2,9 +2,9 @@ use counters::flavors::{Counter, CounterType};
 use counters::Counters;
 use crossbeam_queue::ArrayQueue;
 use dpdk_ffi::{
-    dpdk_rx_one, dpdk_tx_one, rte_dev_iterator, rte_dev_probe, rte_eal_init,
-    rte_eal_mp_remote_launch, rte_eth_conf, rte_eth_dev_configure, rte_eth_dev_socket_id,
-    rte_eth_dev_start, rte_eth_iterator_init, rte_eth_iterator_next,
+    dpdk_mbuf_alloc, dpdk_mtod, dpdk_rx_one, dpdk_tx_one, rte_dev_iterator, rte_dev_probe,
+    rte_eal_init, rte_eal_mp_remote_launch, rte_eth_conf, rte_eth_dev_configure,
+    rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init, rte_eth_iterator_next,
     rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup, rte_eth_tx_queue_setup, rte_mbuf,
     rte_mempool, rte_pktmbuf_pool_create, rte_rmt_call_master_t_SKIP_MASTER, RTE_MAX_ETHPORTS,
     RTE_MEMPOOL_CACHE_MAX_SIZE, SOCKET_ID_ANY,
@@ -86,21 +86,33 @@ impl PktsDpdk {
 
 impl PacketPool for PktsDpdk {
     fn pkt(&mut self, headroom: usize) -> Option<BoxPkt> {
-        if let Some(mut pkt) = self.pkts.pop_front() {
-            pkt.reinit(headroom);
-            Some(pkt)
+        if let Some(mut mbuf) = dpdk_mbuf_alloc(self.dpdk_pool) {
+            if let Some(mut pkt) = self.pkts.pop_front() {
+                unsafe {
+                    pkt.reinit_unsafe(headroom, dpdk_mtod(mbuf), self.particle_sz);
+                }
+                Some(pkt)
+            } else {
+                self.alloc_fail.incr();
+                None
+            }
         } else {
-            self.alloc_fail.incr();
             None
         }
     }
 
     fn particle(&mut self, headroom: usize) -> Option<BoxPart> {
-        if let Some(mut part) = self.particles.pop_front() {
-            part.reinit(headroom);
-            Some(part)
+        if let Some(mut mbuf) = dpdk_mbuf_alloc(self.dpdk_pool) {
+            if let Some(mut part) = self.particles.pop_front() {
+                unsafe {
+                    part.reinit_unsafe(headroom, dpdk_mtod(mbuf), self.particle_sz);
+                }
+                Some(part)
+            } else {
+                self.alloc_fail.incr();
+                None
+            }
         } else {
-            self.alloc_fail.incr();
             None
         }
     }
