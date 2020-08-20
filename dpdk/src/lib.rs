@@ -111,7 +111,7 @@ impl PktsDpdk {
 impl PacketPool for PktsDpdk {
     fn pkt(&mut self, headroom: usize) -> Option<BoxPkt> {
         assert!(headroom as u32 <= RTE_PKTMBUF_HEADROOM);
-        if let Some(mut mbuf) = dpdk_mbuf_alloc(self.dpdk_pool) {
+        if let Some(mbuf) = dpdk_mbuf_alloc(self.dpdk_pool) {
             self.mbuf_to_pkt(mbuf, headroom)
         } else {
             None

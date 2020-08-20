@@ -42,10 +42,10 @@ fn push_pkt(pool: &mut dyn PacketPool, headroom: usize, v: &Vec<u8>, sz: usize, 
     // Push one byte at a time
     while i < v.len() {
         if (i + sz) >= v.len() {
-            assert!(pkt.append(pool, &v[i..]));
+            assert!(pkt.append(append!(pool), &v[i..]));
             break;
         } else {
-            assert!(pkt.append(pool, &v[i..i + sz]));
+            assert!(pkt.append(append!(pool), &v[i..i + sz]));
         }
         i += sz;
     }
@@ -86,16 +86,17 @@ fn prepend_test() {
     let mut pkt = pool.pkt(100).unwrap();
     assert_eq!(pkt.headroom(), 100);
     let v: Vec<u8> = (0..100).map(|x| (x % 256) as u8).collect();
-    assert!(pkt.prepend(&mut *pool, &v[0..]));
+    let sz;
+    assert!(pkt.prepend(prepend!(&mut pool, sz), &v[0..]));
     assert_eq!(pkt.len(), 100);
     assert_eq!(pkt.headroom(), 0);
     assert_eq!(nparticles(&pkt), 1);
     verify_pkt(&mut pkt);
-
     let mut pkt = pool.pkt(100).unwrap();
     assert_eq!(pkt.headroom(), 100);
     let v: Vec<u8> = (0..200).map(|x| (x % 256) as u8).collect();
-    assert!(pkt.prepend(&mut *pool, &v[0..]));
+    let sz;
+    assert!(pkt.prepend(prepend!(&mut pool, sz), &v[0..]));
     assert_eq!(pkt.len(), 200);
     assert_eq!(pkt.headroom(), PARTICLE_SZ - 100); // 100 in the first particle, 100 in next
     assert_eq!(nparticles(&pkt), 2);
@@ -115,7 +116,7 @@ fn move_tail_test() {
     let available = PARTICLE_SZ - headroom;
     let mut pkt = pool.pkt(headroom).unwrap();
     let bytes = vec![0 as u8; available - 10];
-    assert!(pkt.append(&mut *pool, &bytes[0..]));
+    assert!(pkt.append(append!(&mut *pool), &bytes[0..]));
     assert_eq!(pkt.len(), available - 10);
     check_last_part(&mut pkt, headroom + available - 10);
     assert_eq!(pkt.move_tail(10), 10);
@@ -140,7 +141,7 @@ fn move_tail_test() {
     let available = 2 * PARTICLE_SZ - headroom;
     let mut pkt = pool.pkt(headroom).unwrap();
     let bytes = vec![0 as u8; available - 10];
-    assert!(pkt.append(&mut *pool, &bytes[0..]));
+    assert!(pkt.append(append!(&mut *pool), &bytes[0..]));
     assert_eq!(pkt.len(), available - 10);
     check_last_part(&mut pkt, PARTICLE_SZ - 10);
     assert_eq!(pkt.move_tail(10), 10);
@@ -172,7 +173,7 @@ fn slice_test() {
     let headroom = 100;
     let mut pkt = pool.pkt(headroom).unwrap();
     let bytes = vec![0 as u8; 2 * PARTICLE_SZ];
-    assert!(pkt.append(&mut *pool, &bytes[0..]));
+    assert!(pkt.append(append!(&mut *pool), &bytes[0..]));
     let slices = pkt.slices();
     assert_eq!(slices.len(), 3);
     let (s, l) = slices[0];
@@ -197,7 +198,7 @@ fn move_head_test() {
     let available = PARTICLE_SZ - headroom;
     let mut pkt = pool.pkt(headroom).unwrap();
     let bytes = vec![0 as u8; available];
-    assert!(pkt.append(&mut *pool, &bytes[0..]));
+    assert!(pkt.append(append!(&mut *pool), &bytes[0..]));
     assert_eq!(pkt.len(), available);
     // Go front 10
     assert_eq!(pkt.move_head(10), 10);
@@ -233,20 +234,21 @@ fn l2_test() {
     // One particle test
     let headroom = 100;
     let mut pkt = pool.pkt(headroom).unwrap();
-    assert!(pkt.append(&mut *pool, &mac[0..]));
+    assert!(pkt.append(append!(&mut pool), &mac[0..]));
     assert_eq!(pkt.pull_l2(mac.len()), mac.len());
     let (l2, l2len) = pkt.get_l2();
     assert_eq!(l2len, mac.len());
     assert_eq!(mac.iter().zip(l2).all(|(a, b)| a == b), true);
     assert_eq!(pkt.len(), 0);
-    assert!(pkt.push_l2(&mut *pool, &mac));
+    let sz;
+    assert!(pkt.push_l2(prepend!(&mut pool, sz), &mac));
     let (l2, l2len) = pkt.get_l2();
     assert_eq!(l2len, mac.len());
     assert_eq!(mac.iter().zip(l2).all(|(a, b)| a == b), true);
     assert_eq!(pkt.len(), mac.len());
 
     let mut pkt = pool.pkt(headroom).unwrap();
-    assert!(pkt.append(&mut *pool, &mac[0..]));
+    assert!(pkt.append(append!(&mut pool), &mac[0..]));
     assert!(pkt.set_l2(mac.len()));
     let (l2, l2len) = pkt.get_l2();
     assert_eq!(l2len, mac.len());
@@ -261,13 +263,14 @@ fn l3_test() {
     // One particle test
     let headroom = 100;
     let mut pkt = pool.pkt(headroom).unwrap();
-    assert!(pkt.append(&mut *pool, &ip[0..]));
+    assert!(pkt.append(append!(&mut pool), &ip[0..]));
     assert_eq!(pkt.pull_l3(ip.len()), ip.len());
     let (l3, l3len) = pkt.get_l3();
     assert_eq!(l3len, ip.len());
     assert_eq!(ip.iter().zip(l3).all(|(a, b)| a == b), true);
     assert_eq!(pkt.len(), 0);
-    assert!(pkt.push_l3(&mut *pool, &ip));
+    let sz;
+    assert!(pkt.push_l3(prepend!(&mut pool, sz), &ip));
     let (l3, l3len) = pkt.get_l3();
     assert_eq!(l3len, ip.len());
     assert_eq!(ip.iter().zip(l3).all(|(a, b)| a == b), true);

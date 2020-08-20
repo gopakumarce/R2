@@ -1,6 +1,7 @@
 use super::*;
 use counters::Counters;
 use crossbeam_queue::ArrayQueue;
+use packet::append;
 use packet::{PacketPool, PktsHeap};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -65,11 +66,11 @@ fn one_level_linkshare() {
 
     for _ in 0..512 {
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &DATA));
+        assert!(pkt.append(append!(&mut pool), &DATA));
         pkt.out_ifindex = class1;
         hfsc.enqueue(class1, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &DATA));
+        assert!(pkt.append(append!(&mut pool), &DATA));
         pkt.out_ifindex = class2;
         hfsc.enqueue(class2, pkt);
     }
@@ -208,20 +209,20 @@ fn two_level_linkshare() {
 
     for _ in 0..512 {
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &DATA));
+        assert!(pkt.append(append!(&mut pool), &DATA));
         pkt.out_ifindex = l1_c1_l2_c1;
         hfsc.enqueue(l1_c1_l2_c1, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &DATA));
+        assert!(pkt.append(append!(&mut pool), &DATA));
         pkt.out_ifindex = l1_c1_l2_c2;
         hfsc.enqueue(l1_c1_l2_c2, pkt);
 
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &DATA));
+        assert!(pkt.append(append!(&mut pool), &DATA));
         pkt.out_ifindex = l1_c2_l2_c1;
         hfsc.enqueue(l1_c2_l2_c1, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &DATA));
+        assert!(pkt.append(append!(&mut pool), &DATA));
         pkt.out_ifindex = l1_c2_l2_c2;
         hfsc.enqueue(l1_c2_l2_c2, pkt);
     }
@@ -407,19 +408,19 @@ fn single_level_realtime() {
 
     for _ in 0..512 {
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &DATA));
+        assert!(pkt.append(append!(&mut pool), &DATA));
         pkt.out_ifindex = class1;
         hfsc.enqueue(class1, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &DATA));
+        assert!(pkt.append(append!(&mut pool), &DATA));
         pkt.out_ifindex = class2;
         hfsc.enqueue(class2, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &DATA));
+        assert!(pkt.append(append!(&mut pool), &DATA));
         pkt.out_ifindex = class3;
         hfsc.enqueue(class3, pkt);
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &DATA));
+        assert!(pkt.append(append!(&mut pool), &DATA));
         pkt.out_ifindex = class4;
         hfsc.enqueue(class4, pkt);
     }

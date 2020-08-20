@@ -1,6 +1,7 @@
 use super::*;
 use counters::Counters;
 use crossbeam_queue::ArrayQueue;
+use packet::append;
 use packet::{PacketPool, PktsHeap};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -97,7 +98,7 @@ fn read_write() {
         };
         assert!(raw.fd > 0);
 
-        let mut pkt = raw.recvmsg(&mut *pool, 0).unwrap();
+        let pkt = raw.recvmsg(&mut *pool, 0).unwrap();
         let pktlen = pkt.len();
         assert_eq!(MAX_PACKET, pktlen);
         let (buf, len) = match pkt.data(0) {
@@ -121,7 +122,7 @@ fn read_write() {
     let mut pool = packet_pool("sock_read_write_tx", PARTICLE_SZ);
     while wait.load(Ordering::Relaxed) == 0 {
         let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &data[0..]));
+        assert!(pkt.append(append!(&mut pool), &data[0..]));
         assert_eq!(raw.sendmsg(pkt), MAX_PACKET);
         let wait = time::Duration::from_millis(1);
         thread::sleep(wait)

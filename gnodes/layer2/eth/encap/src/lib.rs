@@ -12,6 +12,7 @@ use graph::Gclient;
 use log::Logger;
 use msg::R2Msg;
 use names::l2_eth_encap;
+use packet::prepend;
 use packet::BoxPkt;
 use packet::PacketPool;
 use std::collections::HashMap;
@@ -183,13 +184,14 @@ impl EthEncap {
     }
 
     fn add_eth_hdr(&self, pool: &mut dyn PacketPool, pkt: &mut BoxPkt, mac: &EthMacRaw) -> bool {
-        if !pkt.prepend(pool, &ETH_TYPE_IPV4.to_be_bytes()) {
+        let mut sz;
+        if !pkt.prepend(prepend!(pool, sz), &ETH_TYPE_IPV4.to_be_bytes()) {
             return false;
         }
-        if !pkt.prepend(pool, &self.intf.l2_addr[0..ETH_ALEN]) {
+        if !pkt.prepend(prepend!(pool, sz), &self.intf.l2_addr[0..ETH_ALEN]) {
             return false;
         }
-        if !pkt.prepend(pool, &(*mac.bytes)) {
+        if !pkt.prepend(prepend!(pool, sz), &(*mac.bytes)) {
             return false;
         }
         pkt.set_l2(ETH_ALEN);

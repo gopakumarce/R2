@@ -3,6 +3,7 @@ use super::*;
 use fwd::EthMacAddMsg;
 use fwd::EthMacRaw;
 use graph::Driver;
+use packet::append;
 use packet::{BoxPkt, PacketPool, PktsHeap};
 use socket::RawSock;
 use std::net::Ipv4Addr;
@@ -192,9 +193,9 @@ fn packet_send(done: Arc<AtomicUsize>) -> std::thread::JoinHandle<()> {
             let (mut pool, queue) = packet_pool("main_pkt_send");
             while done.load(Ordering::Relaxed) == 0 {
                 let mut pkt = pool.pkt(0).unwrap();
-                assert!(pkt.append(&mut *pool, &ETH_HDR_IPV4));
+                assert!(pkt.append(append!(&mut pool), &ETH_HDR_IPV4));
                 let data: Vec<u8> = vec![0; DATA_LEN - 14];
-                assert!(pkt.append(&mut *pool, &data));
+                assert!(pkt.append(append!(&mut pool), &data));
                 assert_eq!(raw.sendmsg(pkt), DATA_LEN);
                 while let Ok(p) = queue.pop() {
                     pool.free(p);
