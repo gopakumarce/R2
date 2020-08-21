@@ -12,12 +12,12 @@ include!("bindgen/include/lib.rs");
 
 // This is rte_eth_rx_burst() which is declared as inline and hence bindgen
 // does not generate the bindings.
-pub fn dpdk_rx_one(port_id: usize, queue_id: usize, mbuf: *mut *mut rte_mbuf) {
+pub fn dpdk_rx_one(port_id: usize, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u16 {
     unsafe {
         let dev = &rte_eth_devices[port_id];
         let cb = dev.rx_pkt_burst.unwrap();
         let ptr = (*dev.data).rx_queues.add(queue_id);
-        cb(*ptr, mbuf, 1);
+        cb(*ptr, mbuf, 1)
     }
 }
 
@@ -34,6 +34,19 @@ pub fn dpdk_tx_one(port_id: usize, queue_id: usize, mbuf: *mut *mut rte_mbuf) {
 
 // This is rte_pktmbuf_alloc() which is declared as inline and hence bindgen
 // does not generate the bindings. The original rte_pktmbuf_alloc() has cache
+// allocation etc. which is ignored below, it directly goes to the pool
+pub fn dpdk_mbuf_free(m: *mut rte_mbuf) {
+    unsafe {
+        let mbuf: *mut core::ffi::c_void = m as *mut core::ffi::c_void;
+        let mp: *mut rte_mempool = (*m).pool;
+        let ops: *mut rte_mempool_ops = &mut rte_mempool_ops_table.ops[(*mp).ops_index as usize];
+        let cb = (*ops).enqueue.unwrap();
+        cb(mp, &mbuf, 1);
+    }
+}
+
+// This is rte_pktmbuf_free() which is declared as inline and hence bindgen
+// does not generate the bindings. The original rte_pktmbuf_free() has cache
 // allocation etc. which is ignored below, it directly goes to the pool
 pub fn dpdk_mbuf_alloc(mp: *mut rte_mempool) -> Option<*mut rte_mbuf> {
     unsafe {

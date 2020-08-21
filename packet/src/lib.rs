@@ -51,6 +51,14 @@ impl BoxPart {
         self.tail = headroom;
         self.next = None;
     }
+
+    pub unsafe fn set_raw(&mut self, raw: *mut u8, rlen: usize) {
+        self.raw = from_raw_parts_mut(raw, rlen);
+    }
+
+    pub unsafe fn get_raw(&self) -> *const u8 {
+        self.raw.as_ptr()
+    }
 }
 
 /// By default because BoxPart is a pointer to a Particle, it wont be Send because
@@ -138,6 +146,14 @@ impl BoxPkt {
         self.out_l3addr = ZERO_IP;
         self.particle.reinit(headroom);
     }
+
+    pub unsafe fn set_raw(&mut self, raw: *mut u8, rlen: usize) {
+        self.particle.raw = from_raw_parts_mut(raw, rlen);
+    }
+
+    pub unsafe fn get_raw(&self) -> *const u8 {
+        self.particle.raw.as_ptr()
+    }
 }
 
 /// By default because BoxPkt is a pointer to a Packet, it wont be Send because
@@ -213,6 +229,19 @@ pub trait PacketPool: Send {
         // it anymore
         self.free_pkt(pkt);
     }
+
+    // This is an optional method that packet pools can choose not to implement. This is
+    // supposed to be used only by device drivers which may want special kinds of packets
+    // to be allocated
+    unsafe fn pkt_unsafe(&mut self, _headroom: usize) -> Option<BoxPkt> {
+        None
+    }
+    // This is an optional method that packet pools can choose not to implement. This is
+    // supposed to be used only by device drivers which may want special kinds of particles
+    // to be allocated
+    unsafe fn particle_unsafe(&mut self, _headroom: usize) -> Option<BoxPart> {
+        None
+    }
 }
 
 /// Here we provide a default packet pool implementation, where the Packet, Particle and
@@ -229,9 +258,6 @@ pub struct PktsHeap {
 impl PktsHeap {
     const PARTICLE_ALIGN: usize = 16;
 
-    /// #Safety
-    /// This API deals with constructing packets and particles starting from raw pointers,
-    /// hence this is marked unsafe
     pub fn new(
         queue: Arc<ArrayQueue<BoxPkt>>,
         counters: &mut Counters,
