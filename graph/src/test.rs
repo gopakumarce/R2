@@ -1,7 +1,6 @@
 use super::*;
 use crossbeam_queue::ArrayQueue;
 use log::log;
-use packet::append;
 use packet::{PacketPool, PktsHeap};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -32,7 +31,7 @@ fn new_pkt(pool: &mut dyn PacketPool, count: usize) -> BoxPkt {
     let mut pkt = pool.pkt(0).unwrap();
     let c = cnt.to_be_bytes();
     let v = c.to_vec();
-    assert!(pkt.append(append!(pool), &v));
+    assert!(pkt.append(pool, &v));
     pkt
 }
 

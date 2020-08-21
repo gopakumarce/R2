@@ -43,26 +43,13 @@ impl BoxPart {
         BoxPart(part)
     }
 
-    fn reinit_fields(&mut self, headroom: usize) {
-        self.head = headroom;
-        self.tail = headroom;
-        self.next = None;
-    }
-
     // reinit is called on a particle thats was used before and given back to the
     // particle pool and now being allocated again from the pool
     pub fn reinit(&mut self, headroom: usize) {
-        self.reinit_fields(headroom);
         assert!(headroom <= self.raw.len());
-    }
-
-    // reinit is called on a particle thats was used before and given back to the
-    // particle pool and now being allocated again from the pool. This unsafe version
-    // also modifies the particles raw data pointer
-    pub unsafe fn reinit_unsafe(&mut self, headroom: usize, raw: *mut u8, rlen: usize) {
-        self.reinit_fields(headroom);
-        self.raw = from_raw_parts_mut(raw, rlen);
-        assert!(headroom <= self.raw.len());
+        self.head = headroom;
+        self.tail = headroom;
+        self.next = None;
     }
 }
 
@@ -137,7 +124,9 @@ impl BoxPkt {
         }
     }
 
-    fn reinit_fields(&mut self, headroom: usize) {
+    // reinit() is called on packets which were previously used and returned to the packet pool,
+    // and now its being allocated from the pool again
+    pub fn reinit(&mut self, headroom: usize) {
         self.length = 0;
         self.l2 = 0;
         self.l2_len = 0;
@@ -147,21 +136,7 @@ impl BoxPkt {
         self.in_ifindex = 0;
         self.out_ifindex = 0;
         self.out_l3addr = ZERO_IP;
-    }
-
-    // reinit() is called on packets which were previously used and returned to the packet pool,
-    // and now its being allocated from the pool again
-    pub fn reinit(&mut self, headroom: usize) {
-        self.reinit_fields(headroom);
         self.particle.reinit(headroom);
-    }
-
-    // reinit() is called on packets which were previously used and returned to the packet pool,
-    // and now its being allocated from the pool again. This unsafe version also assigns a new
-    // address to the particle's raw data area
-    pub unsafe fn reinit_unsafe(&mut self, headroom: usize, raw: *mut u8, rlen: usize) {
-        self.reinit_fields(headroom);
-        self.particle.reinit_unsafe(headroom, raw, rlen);
     }
 }
 
@@ -203,20 +178,6 @@ impl Drop for BoxPkt {
     }
 }
 
-#[macro_export]
-macro_rules! prepend {
-    ($pool:expr, $sz:expr) => {{
-        $sz = $pool.particle_sz();
-        &mut || $pool.particle($sz)
-    }};
-}
-
-#[macro_export]
-macro_rules! append {
-    ($pool:expr) => {
-        &mut || $pool.particle(0)
-    };
-}
 /// External clients are free to implement their own versions of a packet pool, the pool
 /// should provide the below methods. And all the addresses/memory in the pool should be
 /// valid across all R2 threads. Each thread has a pool of their own. But the pools are
@@ -507,12 +468,12 @@ impl Packet {
         self.particle.head
     }
 
-    pub fn prepend(&mut self, palloc: &mut dyn FnMut() -> Option<BoxPart>, bytes: &[u8]) -> bool {
+    pub fn prepend(&mut self, pool: &mut dyn PacketPool, bytes: &[u8]) -> bool {
         let mut l = bytes.len();
         while l != 0 {
             let n = self.particle.prepend(&bytes[0..l]);
             if n != l {
-                let p = palloc();
+                let p = pool.particle(pool.particle_sz());
                 if p.is_none() {
                     return false;
                 }
@@ -526,14 +487,14 @@ impl Packet {
         true
     }
 
-    pub fn append(&mut self, palloc: &mut dyn FnMut() -> Option<BoxPart>, bytes: &[u8]) -> bool {
+    pub fn append(&mut self, pool: &mut dyn PacketPool, bytes: &[u8]) -> bool {
         let mut offset = 0;
         while offset != bytes.len() {
             let p = self.particle.last_particle();
             let n = p.append(&bytes[offset..]);
             offset += n;
             if n == 0 {
-                let p = palloc();
+                let p = pool.particle(0);
                 if p.is_none() {
                     return false;
                 }
@@ -584,8 +545,8 @@ impl Packet {
 
     // the 'bytes' worth of data is the layer2 header that we want to add to the
     // head of the packet
-    pub fn push_l2(&mut self, palloc: &mut dyn FnMut() -> Option<BoxPart>, bytes: &[u8]) -> bool {
-        if !self.prepend(palloc, bytes) {
+    pub fn push_l2(&mut self, pool: &mut dyn PacketPool, bytes: &[u8]) -> bool {
+        if !self.prepend(pool, bytes) {
             return false;
         }
         let p = &self.particle;
@@ -636,8 +597,8 @@ impl Packet {
 
     // the 'bytes' worth of data is the layer3 header that we want to add to the
     // head of the packet
-    pub fn push_l3(&mut self, palloc: &mut dyn FnMut() -> Option<BoxPart>, bytes: &[u8]) -> bool {
-        if !self.prepend(palloc, bytes) {
+    pub fn push_l3(&mut self, pool: &mut dyn PacketPool, bytes: &[u8]) -> bool {
+        if !self.prepend(pool, bytes) {
             return false;
         }
         let p = &self.particle;
