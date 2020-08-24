@@ -42,6 +42,12 @@ impl BoxPart {
         };
         BoxPart(part)
     }
+
+    pub fn reinit(&mut self, headroom: usize) {
+        self.head = headroom;
+        self.tail = headroom;
+        self.next = None;
+    }
 }
 
 /// By default because BoxPart is a pointer to a Particle, it wont be Send because
@@ -51,9 +57,9 @@ impl BoxPart {
 unsafe impl Send for BoxPart {}
 
 impl Drop for BoxPart {
-    // A particle is never expected to go out of scope without
-    // being attached to a packet. The packet drop() will free
-    // the particle(s), so nothing to be done here
+    // Outside of the packet library and the PacketPool trait, no one is supposed to
+    // have access to a particle by itself, so particle will go out of scope only while
+    // its attached to a packet, and the packet free takes care of freeing particles
     fn drop(&mut self) {}
 }
 
@@ -95,24 +101,26 @@ impl BoxPkt {
     /// # Safety
     /// This function takes raw pointers and converts it into a Packet, the raw pointer
     /// should have space enough to hold the Packet structure
-    pub unsafe fn new(raw: *mut u8, particle: BoxPart, queue: Arc<ArrayQueue<BoxPkt>>) -> Self {
+    pub unsafe fn new(raw: *mut u8, queue: Arc<ArrayQueue<BoxPkt>>) -> Self {
         #[allow(clippy::cast_ptr_alignment)]
         let pkt = raw as *mut Packet;
-        *pkt = Packet {
-            particle: Some(ManuallyDrop::new(particle)),
-            length: 0,
-            l2: 0,
-            l2_len: 0,
-            l3: 0,
-            l3_len: 0,
-            in_ifindex: 0,
-            out_ifindex: 0,
-            out_l3addr: ZERO_IP,
-        };
+        *pkt = Packet::default();
         BoxPkt {
             pkt: ManuallyDrop::new(pkt),
             queue: ManuallyDrop::new(queue),
         }
+    }
+
+    pub fn reinit(&mut self, particle: BoxPart) {
+        self.length = 0;
+        self.l2 = 0;
+        self.l2_len = 0;
+        self.l3 = 0;
+        self.l3_len = 0;
+        self.in_ifindex = 0;
+        self.out_ifindex = 0;
+        self.out_l3addr = ZERO_IP;
+        self.particle = Some(ManuallyDrop::new(particle));
     }
 }
 
@@ -212,8 +220,7 @@ impl PktsHeap {
         particle_sz: usize,
     ) -> Self {
         assert!(num_parts >= num_pkts);
-        let parts_left = num_parts - num_pkts;
-        let particles = VecDeque::with_capacity(parts_left);
+        let particles = VecDeque::with_capacity(num_parts);
         let pkts = VecDeque::with_capacity(num_pkts);
         let alloc_fail = Counter::new(counters, "PKTS_HEAP", CounterType::Error, "PktAllocFail");
         let mut pool = PktsHeap {
@@ -225,20 +232,12 @@ impl PktsHeap {
 
         unsafe {
             for _ in 0..num_pkts {
-                let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
-                let raw: *mut u8 = alloc(lraw);
-                let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
-                let part: *mut u8 = alloc(lpart);
                 let lpkt = Layout::from_size_align(BoxPkt::size(), BoxPkt::align()).unwrap();
                 let pkt: *mut u8 = alloc(lpkt);
-                pool.pkts.push_front(BoxPkt::new(
-                    pkt,
-                    BoxPart::new(part, raw, particle_sz),
-                    queue.clone(),
-                ));
+                pool.pkts.push_front(BoxPkt::new(pkt, queue.clone()));
             }
 
-            for _ in 0..parts_left {
+            for _ in 0..num_parts {
                 let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
                 let raw: *mut u8 = alloc(lraw);
                 let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
@@ -253,10 +252,9 @@ impl PktsHeap {
 
 impl PacketPool for PktsHeap {
     fn pkt(&mut self, headroom: usize) -> Option<BoxPkt> {
-        if let Some(pkt) = self.pkts.pop_front() {
-            if let Some(mut part) = self.particles.pop_front() {
-                part.head = headroom;
-                part.tail = headroom;
+        if let Some(mut pkt) = self.pkts.pop_front() {
+            if let Some(part) = self.particle(headroom) {
+                pkt.reinit(part);
                 Some(pkt)
             } else {
                 self.alloc_fail.incr();
@@ -271,8 +269,7 @@ impl PacketPool for PktsHeap {
 
     fn particle(&mut self, headroom: usize) -> Option<BoxPart> {
         if let Some(mut part) = self.particles.pop_front() {
-            part.head = headroom;
-            part.tail = headroom;
+            part.reinit(headroom);
             Some(part)
         } else {
             self.alloc_fail.incr();
