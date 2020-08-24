@@ -18,8 +18,8 @@ fn packet_pool(test: &str) -> Box<dyn PacketPool> {
 
 fn nparticles(pkt: &BoxPkt) -> usize {
     let mut cnt = 1;
-    let mut p = &pkt.particle;
-    while let Some(ref next) = p.next {
+    let mut p = pkt.particle.as_ref().unwrap();
+    while let Some(next) = p.next.as_ref() {
         cnt += 1;
         p = next;
     }
@@ -103,7 +103,7 @@ fn prepend_test() {
 }
 
 fn check_last_part(pkt: &mut BoxPkt, tail: usize) {
-    let p = pkt.particle.last_particle();
+    let p = pkt.particle.as_mut().unwrap().last_particle();
     assert_eq!(p.tail, tail);
 }
 
@@ -163,7 +163,7 @@ fn move_tail_test() {
 
 fn check_first_part(pkt: &BoxPkt, head: usize) {
     let p = &pkt.particle;
-    assert_eq!(p.head, head);
+    assert_eq!(p.as_ref().unwrap().head, head);
 }
 
 #[test]
@@ -176,16 +176,16 @@ fn slice_test() {
     let slices = pkt.slices();
     assert_eq!(slices.len(), 3);
     let (s, l) = slices[0];
-    let p = &pkt.particle;
-    assert_eq!(s, &p.raw[headroom..p.tail]);
+    let p = pkt.particle.as_ref().unwrap();
+    assert_eq!(s, &p.raw.as_ref().unwrap()[headroom..p.tail]);
     assert_eq!(l, PARTICLE_SZ - headroom);
     let (s, l) = slices[1];
     let p = p.next.as_ref().unwrap();
-    assert_eq!(s, &p.raw[0..p.tail]);
+    assert_eq!(s, &p.raw.as_ref().unwrap()[0..p.tail]);
     assert_eq!(l, PARTICLE_SZ);
     let (s, l) = slices[2];
     let p = p.next.as_ref().unwrap();
-    assert_eq!(s, &p.raw[0..p.tail]);
+    assert_eq!(s, &p.raw.as_ref().unwrap()[0..p.tail]);
     assert_eq!(l, headroom);
 }
 
