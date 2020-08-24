@@ -193,6 +193,13 @@ pub trait PacketPool: Send {
         // it anymore
         self.free_pkt(pkt);
     }
+
+    // This is an optional method and used only when interacting with third party libraries
+    // like dpdk that have pool management of their own, this will be called only from drivers
+    // (like dpdk), apps/gnodes are NOT supposed to call this
+    fn pkt_with_particles(&mut self, _part: BoxPart) -> Option<BoxPkt> {
+        None
+    }
 }
 
 /// Here we provide a default packet pool implementation, where the Packet, Particle and
@@ -234,14 +241,17 @@ impl PktsHeap {
             for _ in 0..num_pkts {
                 let lpkt = Layout::from_size_align(BoxPkt::size(), BoxPkt::align()).unwrap();
                 let pkt: *mut u8 = alloc(lpkt);
+                assert_ne!(pkt, 0 as *mut u8);
                 pool.pkts.push_front(BoxPkt::new(pkt, queue.clone()));
             }
 
             for _ in 0..num_parts {
                 let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
                 let raw: *mut u8 = alloc(lraw);
+                assert_ne!(raw, 0 as *mut u8);
                 let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
                 let part: *mut u8 = alloc(lpart);
+                assert_ne!(part, 0 as *mut u8);
                 pool.particles
                     .push_front(BoxPart::new(part, raw, particle_sz));
             }
@@ -317,7 +327,7 @@ impl Particle {
         ))
     }
 
-    fn data_raw(&self, offset: usize) -> &[u8] {
+    pub fn data_raw(&self, offset: usize) -> &[u8] {
         if offset >= self.raw.as_ref().unwrap().len() {
             &[]
         } else {
@@ -442,7 +452,7 @@ pub struct Packet {
 }
 
 impl Default for Packet {
-    fn default() -> Packet {
+    fn default() -> Self {
         Packet {
             particle: None,
             length: 0,

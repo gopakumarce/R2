@@ -6,8 +6,8 @@ use dpdk_ffi::{
     rte_eal_init, rte_eal_mp_remote_launch, rte_eth_conf, rte_eth_dev_configure,
     rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init, rte_eth_iterator_next,
     rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup, rte_eth_tx_queue_setup, rte_mbuf,
-    rte_mempool, rte_pktmbuf_pool_create, rte_rmt_call_master_t_SKIP_MASTER, RTE_MAX_ETHPORTS,
-    RTE_MEMPOOL_CACHE_MAX_SIZE, RTE_PKTMBUF_HEADROOM, SOCKET_ID_ANY,
+    rte_mempool, rte_mempool_obj_iter, rte_pktmbuf_pool_create, rte_rmt_call_master_t_SKIP_MASTER,
+    RTE_MAX_ETHPORTS, RTE_MEMPOOL_CACHE_MAX_SIZE, RTE_PKTMBUF_HEADROOM, SOCKET_ID_ANY,
 };
 use graph::Driver;
 use packet::{BoxPart, BoxPkt, PacketPool};
@@ -21,18 +21,53 @@ use std::{mem, sync::Arc};
 const N_RX_DESC: u16 = 128;
 const N_TX_DESC: u16 = 128;
 
-pub struct PktsDpdk {
+struct PktsDpdk {
     dpdk_pool: *mut rte_mempool,
     alloc_fail: Counter,
     pkts: VecDeque<BoxPkt>,
-    particles: VecDeque<BoxPart>,
     particle_sz: usize,
 }
 
 unsafe impl Send for PktsDpdk {}
 
+// The format of the mbuf is as below.
+// [[struct rte_mbuf][headroom][data area of particle_sz]]
+// The mbuf->buf_addr for a newly allocated mbuf will point to the start of the [headroom] area,
+// ie right after the struct rte_mbuf. So the total available size for storing data is
+// headroom + data area of particle_sz(). On receiving a packet from dpdk, usually the data is
+// written starting at the section [data area], ie the headroom is left intact for applications
+// to "append" data at the head of the mbuf.
+//
+// The headroom itself is as below
+// [mbuf-address R2-Particle-addres ...rest of headroom..]
+// So the first two words of the headroom are stolen by R2 to store the mbuf structure address
+// itself, and address of the in-heap Particle structure, so the real available headroom is less
+// by two words
 const MBUFPTR_SZ: usize = mem::size_of::<*mut rte_mbuf>();
-const HEADROOM: usize = RTE_PKTMBUF_HEADROOM as usize - MBUFPTR_SZ;
+const PARTPTR_SZ: usize = mem::size_of::<*mut u8>();
+const HEADROOM: usize = RTE_PKTMBUF_HEADROOM as usize - MBUFPTR_SZ - PARTPTR_SZ;
+
+// For each mbuf, fill up the first two words in the headroom with the mbuf ptr and particle ptr
+unsafe extern "C" fn dpdk_init_mbuf(
+    mp: *mut rte_mempool,
+    opaque: *mut core::ffi::c_void,
+    mbuf: *mut core::ffi::c_void,
+    index: u32,
+) {
+    unsafe {
+        let m: *mut rte_mbuf = mbuf as *mut rte_mbuf;
+        let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
+        let part: *mut u8 = alloc(lpart);
+        assert_ne!(part, 0 as *mut u8);
+        unsafe {
+            let mut mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
+            *mbufptr = m;
+            mbufptr = mbufptr.add(1);
+            let partptr: *mut *mut u8 = mbufptr as *mut *mut u8;
+            *partptr = part;
+        }
+    }
+}
 
 impl PktsDpdk {
     pub fn new(
@@ -43,68 +78,38 @@ impl PktsDpdk {
         particle_sz: usize,
     ) -> Self {
         assert!(num_parts >= num_pkts);
-        let parts_left = num_parts - num_pkts;
-        let particles = VecDeque::with_capacity(parts_left);
         let pkts = VecDeque::with_capacity(num_pkts);
-        let alloc_fail = Counter::new(counters, "PKTS_HEAP", CounterType::Error, "PktAllocFail");
+        let alloc_fail = Counter::new(counters, "PKS_DPDK", CounterType::Error, "PktAllocFail");
         let dpdk_pool = dpdk_buffer_init(num_parts as u32, particle_sz as u16);
         let mut pool = PktsDpdk {
             dpdk_pool,
             alloc_fail,
             pkts,
-            particles,
             particle_sz,
         };
 
         unsafe {
             for _ in 0..num_pkts {
-                let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
-                let part: *mut u8 = alloc(lpart);
                 let lpkt = Layout::from_size_align(BoxPkt::size(), BoxPkt::align()).unwrap();
                 let pkt: *mut u8 = alloc(lpkt);
-                pool.pkts.push_front(BoxPkt::new(
-                    pkt,
-                    BoxPart::new(part, 0 as *mut u8, particle_sz),
-                    queue.clone(),
-                ));
+                assert_ne!(pkt, 0 as *mut u8);
+                pool.pkts.push_front(BoxPkt::new(pkt, queue.clone()));
             }
-
-            for _ in 0..parts_left {
-                let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
-                let part: *mut u8 = alloc(lpart);
-                pool.particles
-                    .push_front(BoxPart::new(part, 0 as *mut u8, particle_sz));
-            }
+            rte_mempool_obj_iter(dpdk_pool, Some(dpdk_init_mbuf), 0 as *mut core::ffi::c_void);
         }
         pool
     }
 }
 
-// Allocation: First allocate a dpdk mbuf, and then allocate an R2 pkt/particle and attach the
-// mbuf's address as a raw pointer to the particle. We cant really keep a 'preallocated' pool
-// like PktsHeap because mbuf free happens inside dpdk and we have no control over it. If dpdk
-// had an mbuf free callback, we could have done some preallocation.
-//
-// Free: First free the dpdk mbuf and then return the pkt/particle to the R2 pool
-//
-// The first word of the mbuf data area is used to store the address of the mbuf itself, and
-// the next word is what becomes the 'raw' data area for the R2 particle
-
 impl PacketPool for PktsDpdk {
     fn pkt(&mut self, headroom: usize) -> Option<BoxPkt> {
         assert!(headroom <= HEADROOM);
-        if let Some(m) = dpdk_mbuf_alloc(self.dpdk_pool) {
+        if let Some(p) = self.particle(headroom) {
             if let Some(mut pkt) = self.pkts.pop_front() {
-                pkt.reinit(headroom);
-                unsafe {
-                    let mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
-                    *mbufptr = m;
-                    pkt.set_raw(mbufptr.add(1) as *mut u8, self.particle_sz + HEADROOM);
-                }
+                pkt.reinit(p);
                 Some(pkt)
             } else {
-                dpdk_mbuf_free(m);
-                self.alloc_fail.incr();
+                self.free_part(p);
                 None
             }
         } else {
@@ -116,58 +121,45 @@ impl PacketPool for PktsDpdk {
     fn particle(&mut self, headroom: usize) -> Option<BoxPart> {
         assert!(headroom <= HEADROOM);
         if let Some(m) = dpdk_mbuf_alloc(self.dpdk_pool) {
-            if let Some(mut part) = self.particles.pop_front() {
-                part.reinit(headroom);
-                unsafe {
-                    let mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
-                    *mbufptr = m;
-                    part.set_raw(mbufptr.add(1) as *mut u8, self.particle_sz + HEADROOM);
-                }
+            unsafe {
+                let mut mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
+                mbufptr = mbufptr.add(1);
+                let partptr: *mut *mut u8 = mbufptr as *mut *mut u8;
+                let part = BoxPart::new(*partptr, (*m).buf_addr as *mut u8, self.particle_sz());
                 Some(part)
-            } else {
-                dpdk_mbuf_free(m);
-                self.alloc_fail.incr();
-                None
             }
         } else {
+            self.alloc_fail.incr();
             None
         }
     }
 
     fn free_pkt(&mut self, mut pkt: BoxPkt) {
-        unsafe {
-            let mut mbufptr: *const *mut rte_mbuf = pkt.get_raw() as *const *mut rte_mbuf;
-            mbufptr = mbufptr.sub(1);
-            let m: *mut rte_mbuf = *mbufptr;
-            dpdk_mbuf_free(m);
-            pkt.set_raw(0 as *mut u8, 0);
-        }
         self.pkts.push_front(pkt);
     }
 
     fn free_part(&mut self, mut part: BoxPart) {
         unsafe {
-            let mut mbufptr: *const *mut rte_mbuf = part.get_raw() as *const *mut rte_mbuf;
+            let mut partptr: *const *mut u8 = part.data_raw(0).as_ptr() as *const *mut u8;
+            partptr = partptr.sub(1);
+            let mut mbufptr: *const *mut rte_mbuf = partptr as *const *mut rte_mbuf;
             mbufptr = mbufptr.sub(1);
             let m: *mut rte_mbuf = *mbufptr;
             dpdk_mbuf_free(m);
-            part.set_raw(0 as *mut u8, 0);
         }
-        self.particles.push_front(part);
     }
 
     fn particle_sz(&self) -> usize {
         self.particle_sz
     }
 
-    // Used by dpdk Rx driver, the driver comes with an mbuf of its own, so we
-    // dont need a packet allocated with an mbuf, we just need an empty pkt/particle
-    unsafe fn pkt_unsafe(&mut self, headroom: usize) -> Option<BoxPkt> {
+    fn pkt_with_particles(&mut self, part: BoxPart) -> Option<BoxPkt> {
         if let Some(mut pkt) = self.pkts.pop_front() {
-            pkt.reinit(headroom);
+            pkt.reinit(part);
             Some(pkt)
         } else {
             self.alloc_fail.incr();
+            self.free_part(part);
             None
         }
     }
@@ -189,15 +181,12 @@ impl Driver for Dpdk {
             None
         } else {
             unsafe {
-                if let Some(mut pkt) = pool.pkt_unsafe(headroom) {
-                    let mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
-                    *mbufptr = m;
-                    pkt.set_raw(mbufptr.add(1) as *mut u8, pool.particle_sz() + HEADROOM);
-                    assert!(pkt.move_tail((*m).data_len as isize) == (*m).data_len as isize);
-                    Some(pkt)
-                } else {
-                    None
-                }
+                let mut mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
+                mbufptr = mbufptr.add(1);
+                let partptr: *mut *mut u8 = mbufptr as *mut *mut u8;
+                let mut part = BoxPart::new(*partptr, (*m).buf_addr as *mut u8, pool.particle_sz());
+                part.reinit(headroom);
+                pool.pkt_with_particles(part)
             }
         }
     }
