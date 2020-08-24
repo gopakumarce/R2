@@ -119,7 +119,7 @@ impl EthEncap {
         let pkt = pool.pkt(0 /* no headroom */);
         pkt.as_ref()?;
         let mut pkt = pkt.unwrap();
-        let raw = pkt.data_raw_mut();
+        let raw = pkt.data_head_mut();
 
         // Dest mac all ones
         let off = EthOffsets::EthDaddrOff as usize;

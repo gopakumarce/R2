@@ -664,12 +664,12 @@ impl Packet {
         None
     }
 
-    pub fn data_raw(&self) -> &[u8] {
+    pub fn data_head(&self) -> &[u8] {
         let p = self.particle.as_ref().unwrap();
         p.data_raw(0)
     }
 
-    pub fn data_raw_mut(&mut self) -> &mut [u8] {
+    pub fn data_head_mut(&mut self) -> &mut [u8] {
         let p = self.particle.as_mut().unwrap();
         p.data_raw_mut(0)
     }

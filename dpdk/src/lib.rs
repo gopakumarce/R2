@@ -30,6 +30,9 @@ struct PktsDpdk {
 
 unsafe impl Send for PktsDpdk {}
 
+// NOTE: As of today R2 supports only single buffer dpdk packets. It is not very hard to extend
+// support to multi buffer mbufs, just postponing that to when its required.
+
 // The format of the mbuf is as below.
 // [[struct rte_mbuf][headroom][data area of particle_sz]]
 // The mbuf->buf_addr for a newly allocated mbuf will point to the start of the [headroom] area,
@@ -54,19 +57,15 @@ unsafe extern "C" fn dpdk_init_mbuf(
     mbuf: *mut core::ffi::c_void,
     index: u32,
 ) {
-    unsafe {
-        let m: *mut rte_mbuf = mbuf as *mut rte_mbuf;
-        let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
-        let part: *mut u8 = alloc(lpart);
-        assert_ne!(part, 0 as *mut u8);
-        unsafe {
-            let mut mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
-            *mbufptr = m;
-            mbufptr = mbufptr.add(1);
-            let partptr: *mut *mut u8 = mbufptr as *mut *mut u8;
-            *partptr = part;
-        }
-    }
+    let m: *mut rte_mbuf = mbuf as *mut rte_mbuf;
+    let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
+    let part: *mut u8 = alloc(lpart);
+    assert_ne!(part, 0 as *mut u8);
+    let mut mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
+    *mbufptr = m;
+    mbufptr = mbufptr.add(1);
+    let partptr: *mut *mut u8 = mbufptr as *mut *mut u8;
+    *partptr = part;
 }
 
 impl PktsDpdk {
@@ -87,7 +86,7 @@ impl PktsDpdk {
             pkts,
             particle_sz,
         };
-
+        assert_ne!(dpdk_pool, 0 as *mut rte_mempool);
         unsafe {
             for _ in 0..num_pkts {
                 let lpkt = Layout::from_size_align(BoxPkt::size(), BoxPkt::align()).unwrap();
@@ -134,11 +133,11 @@ impl PacketPool for PktsDpdk {
         }
     }
 
-    fn free_pkt(&mut self, mut pkt: BoxPkt) {
+    fn free_pkt(&mut self, pkt: BoxPkt) {
         self.pkts.push_front(pkt);
     }
 
-    fn free_part(&mut self, mut part: BoxPart) {
+    fn free_part(&mut self, part: BoxPart) {
         unsafe {
             let mut partptr: *const *mut u8 = part.data_raw(0).as_ptr() as *const *mut u8;
             partptr = partptr.sub(1);
@@ -191,10 +190,15 @@ impl Driver for Dpdk {
         }
     }
 
-    fn sendmsg(&self, pkt: BoxPkt) -> usize {
+    fn sendmsg(&self, mut pkt: BoxPkt) -> usize {
         unsafe {
             let len = pkt.len();
-            let mut mbuf = mem::MaybeUninit::uninit().assume_init();
+            let m = pkt.data_head_mut().as_mut_ptr();
+            let mut partptr: *mut *mut u8 = m as *mut *mut u8;
+            partptr = partptr.sub(1);
+            let mut mbufptr: *mut *mut rte_mbuf = partptr as *mut *mut rte_mbuf;
+            mbufptr = mbufptr.sub(1);
+            let mut mbuf: *mut rte_mbuf = *mbufptr;
             dpdk_tx_one(self.port, 0, &mut mbuf);
             len
         }
