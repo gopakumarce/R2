@@ -20,7 +20,7 @@ impl Driver for RawSock {
         }
         let mut pkt = pkt.unwrap();
         unsafe {
-            let buf = pkt.data_head();
+            let buf = pkt.head();
             let mut iov: libc::iovec = mem::MaybeUninit::uninit().assume_init();
             let head = buf.as_ptr() as u64 + pkt.headroom() as u64;
             iov.iov_base = head as *mut libc::c_void;

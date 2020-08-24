@@ -48,7 +48,8 @@ unsafe impl Send for PktsDpdk {}
 // by two words
 const MBUFPTR_SZ: usize = mem::size_of::<*mut rte_mbuf>();
 const PARTPTR_SZ: usize = mem::size_of::<*mut u8>();
-const HEADROOM: usize = RTE_PKTMBUF_HEADROOM as usize - MBUFPTR_SZ - PARTPTR_SZ;
+const HEADROOM_STEAL: usize = MBUFPTR_SZ + PARTPTR_SZ;
+const HEADROOM: usize = RTE_PKTMBUF_HEADROOM as usize - HEADROOM_STEAL;
 
 // For each mbuf, fill up the first two words in the headroom with the mbuf ptr and particle ptr
 unsafe extern "C" fn dpdk_init_mbuf(
@@ -100,6 +101,13 @@ impl PktsDpdk {
     }
 }
 
+fn mbuf_to_raw(m: *mut rte_mbuf) -> *mut u8 {
+    unsafe {
+        let raw = (*m).buf_addr as u64;
+        (raw - HEADROOM_STEAL as u64) as *mut u8
+    }
+}
+
 impl PacketPool for PktsDpdk {
     fn pkt(&mut self, headroom: usize) -> Option<BoxPkt> {
         assert!(headroom <= HEADROOM);
@@ -124,7 +132,7 @@ impl PacketPool for PktsDpdk {
                 let mut mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
                 mbufptr = mbufptr.add(1);
                 let partptr: *mut *mut u8 = mbufptr as *mut *mut u8;
-                let part = BoxPart::new(*partptr, (*m).buf_addr as *mut u8, self.particle_sz());
+                let part = BoxPart::new(*partptr, mbuf_to_raw(m), self.particle_sz());
                 Some(part)
             }
         } else {
@@ -181,9 +189,10 @@ impl Driver for Dpdk {
         } else {
             unsafe {
                 let mut mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
+                assert_eq!(*mbufptr, m);
                 mbufptr = mbufptr.add(1);
                 let partptr: *mut *mut u8 = mbufptr as *mut *mut u8;
-                let mut part = BoxPart::new(*partptr, (*m).buf_addr as *mut u8, pool.particle_sz());
+                let mut part = BoxPart::new(*partptr, mbuf_to_raw(m), pool.particle_sz());
                 part.reinit(headroom);
                 pool.pkt_with_particles(part)
             }
@@ -193,12 +202,17 @@ impl Driver for Dpdk {
     fn sendmsg(&self, mut pkt: BoxPkt) -> usize {
         unsafe {
             let len = pkt.len();
-            let m = pkt.data_head_mut().as_mut_ptr();
+            let m = pkt.head_mut().as_mut_ptr();
             let mut partptr: *mut *mut u8 = m as *mut *mut u8;
             partptr = partptr.sub(1);
             let mut mbufptr: *mut *mut rte_mbuf = partptr as *mut *mut rte_mbuf;
             mbufptr = mbufptr.sub(1);
             let mut mbuf: *mut rte_mbuf = *mbufptr;
+            // As soon as pkt goes out of scope, rust will free it, so we need to bump up refcnt
+            // so that dpdk still has valid mbuf with it. We are not using any atomic ops here
+            // because we use one pool per thread.
+            (*mbuf).__bindgen_anon_2.refcnt_atomic.cnt =
+                (*mbuf).__bindgen_anon_2.refcnt_atomic.cnt + 1;
             dpdk_tx_one(self.port, 0, &mut mbuf);
             len
         }
