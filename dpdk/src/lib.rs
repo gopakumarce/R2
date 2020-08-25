@@ -34,12 +34,11 @@ unsafe impl Send for PktsDpdk {}
 // support to multi buffer mbufs, just postponing that to when its required.
 
 // The format of the mbuf is as below.
-// [[struct rte_mbuf][headroom][data area of particle_sz]]
+// [[struct rte_mbuf][headroom][data area]]
 // The mbuf->buf_addr for a newly allocated mbuf will point to the start of the [headroom] area,
-// ie right after the struct rte_mbuf. So the total available size for storing data is
-// headroom + data area of particle_sz(). On receiving a packet from dpdk, usually the data is
-// written starting at the section [data area], ie the headroom is left intact for applications
-// to "append" data at the head of the mbuf.
+// ie right after the struct rte_mbuf. Note that headroom + [data area] is equal to partcle_sz().
+// On receiving a packet from dpdk, usually the data is written starting at the section [data area],
+// ie the headroom is left intact for applications to "append" data at the head of the mbuf.
 //
 // The headroom itself is as below
 // [mbuf-address R2-Particle-addres ...rest of headroom..]
@@ -71,6 +70,7 @@ unsafe extern "C" fn dpdk_init_mbuf(
 
 impl PktsDpdk {
     pub fn new(
+        name: &str,
         queue: Arc<ArrayQueue<BoxPkt>>,
         counters: &mut Counters,
         num_pkts: usize,
@@ -80,7 +80,7 @@ impl PktsDpdk {
         assert!(num_parts >= num_pkts);
         let pkts = VecDeque::with_capacity(num_pkts);
         let alloc_fail = Counter::new(counters, "PKS_DPDK", CounterType::Error, "PktAllocFail");
-        let dpdk_pool = dpdk_buffer_init(num_parts as u32, particle_sz as u16);
+        let dpdk_pool = dpdk_buffer_init(name, num_parts as u32, particle_sz as u16);
         let mut pool = PktsDpdk {
             dpdk_pool,
             alloc_fail,
@@ -231,15 +231,16 @@ fn get_opt(opt: &str) -> *const libc::c_char {
     ptr
 }
 
-fn dpdk_init(_mem_sz: usize, _ncores: usize) -> Result<(), usize> {
+fn dpdk_init(mem_sz: usize, _ncores: usize) -> Result<(), i32> {
     let mut argv = vec![
         get_opt("r2"),
         get_opt("-m"),
-        get_opt("128"),
+        get_opt(&format!("{}", mem_sz)),
         get_opt("--no-huge"),
         get_opt("--no-pci"),
         get_opt("--lcores=0"),
         get_opt("--master-lcore=0"),
+        //get_opt("--log-level=*:8"),
     ];
     unsafe {
         let argv_ptr = argv.as_mut_ptr() as *mut *mut libc::c_char;
@@ -248,8 +249,9 @@ fn dpdk_init(_mem_sz: usize, _ncores: usize) -> Result<(), usize> {
         // duplicating entries etc. Leaking this memory intentionally to
         // avoid dealing with what dpdk does inside with the argv
         mem::forget(argv);
-        if rte_eal_init(argv_len, argv_ptr) < 0 {
-            return Err(0);
+        let ret = rte_eal_init(argv_len, argv_ptr);
+        if ret < 0 {
+            return Err(ret);
         }
         Ok(())
     }
@@ -269,20 +271,11 @@ fn dpdk_launch() {
     }
 }
 
-fn dpdk_buffer_init(nbufs: u32, buf_sz: u16) -> *mut rte_mempool {
-    let cstr = CString::new("dpdk_mbufs").unwrap();
+fn dpdk_buffer_init(name: &str, nbufs: u32, buf_sz: u16) -> *mut rte_mempool {
+    let cstr = CString::new(name).unwrap();
     let name = cstr.as_ptr();
     mem::forget(cstr);
-    unsafe {
-        rte_pktmbuf_pool_create(
-            name,
-            nbufs,
-            RTE_MEMPOOL_CACHE_MAX_SIZE,
-            0,
-            buf_sz,
-            SOCKET_ID_ANY,
-        )
-    }
+    unsafe { rte_pktmbuf_pool_create(name, nbufs, 0, 0, buf_sz, SOCKET_ID_ANY) }
 }
 
 fn dpdk_port_cfg(port: u16) -> Result<(), port_init_err> {

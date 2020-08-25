@@ -15,6 +15,7 @@ fn packet_pool(test: &str) -> (Box<dyn PacketPool>, Arc<ArrayQueue<BoxPkt>>) {
     let mut counters = Counters::new(test).unwrap();
     (
         Box::new(PktsHeap::new(
+            "PKTS_HEAP",
             q.clone(),
             &mut counters,
             NUM_PKTS,

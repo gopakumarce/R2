@@ -8,6 +8,7 @@ fn packet_pool(test: &str) -> Box<dyn PacketPool> {
     let q = Arc::new(ArrayQueue::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
     Box::new(PktsHeap::new(
+        "PKTS_HEAP",
         q,
         &mut counters,
         NUM_PKTS,

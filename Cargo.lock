@@ -129,6 +129,7 @@ dependencies = [
  "graph 0.1.0",
  "libc 0.2.62 (registry+https://github.com/rust-lang/crates.io-index)",
  "packet 0.1.0",
+ "socket 0.1.0",
 ]
 
 [[package]]

@@ -213,6 +213,7 @@ fn launch_threads(r2: &mut R2, graph: Graph<R2Msg>) {
     for t in 1..r2.nthreads {
         let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
         let pool = Box::new(PktsHeap::new(
+            "PKTS_HEAP",
             queue.clone(),
             &mut r2.counters,
             DEF_PKTS,
@@ -254,6 +255,7 @@ fn main() {
     let mut r2 = r2_rc.lock().unwrap();
     let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
     let pool = Box::new(PktsHeap::new(
+        "PKTS_HEAP",
         queue.clone(),
         &mut r2.counters,
         DEF_PKTS,

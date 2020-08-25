@@ -15,7 +15,14 @@ const NUM_PART: usize = 2 * 4096;
 fn packet_pool(test: &str) -> Box<dyn PacketPool> {
     let q = Arc::new(ArrayQueue::<BoxPkt>::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
-    Box::new(PktsHeap::new(q, &mut counters, NUM_PKTS, NUM_PART, PKTSZ))
+    Box::new(PktsHeap::new(
+        "PKTS_HEAP",
+        q,
+        &mut counters,
+        NUM_PKTS,
+        NUM_PART,
+        PKTSZ,
+    ))
 }
 
 // Create two classes with bandwidth ratio 1:10

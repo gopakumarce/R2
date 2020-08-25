@@ -16,7 +16,14 @@ const PARTICLE_SZ: usize = 512;
 fn packet_pool(test: &str, part_sz: usize) -> Box<dyn PacketPool> {
     let q = Arc::new(ArrayQueue::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
-    Box::new(PktsHeap::new(q, &mut counters, NUM_PKTS, NUM_PART, part_sz))
+    Box::new(PktsHeap::new(
+        "PKTS_HEAP",
+        q,
+        &mut counters,
+        NUM_PKTS,
+        NUM_PART,
+        part_sz,
+    ))
 }
 
 fn delete_veth() {
@@ -97,7 +104,7 @@ fn read_write() {
         };
         assert!(raw.fd > 0);
 
-        let mut pkt = raw.recvmsg(&mut *pool, 0).unwrap();
+        let pkt = raw.recvmsg(&mut *pool, 0).unwrap();
         let pktlen = pkt.len();
         assert_eq!(MAX_PACKET, pktlen);
         let (buf, len) = match pkt.data(0) {

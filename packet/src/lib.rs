@@ -220,6 +220,7 @@ impl PktsHeap {
     /// This API deals with constructing packets and particles starting from raw pointers,
     /// hence this is marked unsafe
     pub fn new(
+        name: &str,
         queue: Arc<ArrayQueue<BoxPkt>>,
         counters: &mut Counters,
         num_pkts: usize,
@@ -229,7 +230,7 @@ impl PktsHeap {
         assert!(num_parts >= num_pkts);
         let particles = VecDeque::with_capacity(num_parts);
         let pkts = VecDeque::with_capacity(num_pkts);
-        let alloc_fail = Counter::new(counters, "PKTS_HEAP", CounterType::Error, "PktAllocFail");
+        let alloc_fail = Counter::new(counters, name, CounterType::Error, "PktAllocFail");
         let mut pool = PktsHeap {
             alloc_fail,
             pkts,

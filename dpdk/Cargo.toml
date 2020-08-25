@@ -11,3 +11,4 @@ dpdk-ffi = { path = "../ffis/dpdk" }
 graph = { path = "../graph" }
 packet = { path = "../packet" }
 counters = { path = "../counters" }
+socket = { path = "../unix/socket" }
