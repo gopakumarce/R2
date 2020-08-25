@@ -109,7 +109,7 @@ fn read_write() {
             Err(errno) => panic!("Errno {} opening socket", errno),
         };
 
-        let mut pkt = raw.recvmsg(&mut *pool, 0).unwrap();
+        let pkt = raw.recvmsg(&mut *pool, 0).unwrap();
         let pktlen = pkt.len();
         assert_eq!(MAX_PACKET, pktlen);
         let (buf, len) = match pkt.data(0) {
