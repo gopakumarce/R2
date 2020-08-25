@@ -104,7 +104,7 @@ impl PktsDpdk {
 fn mbuf_to_raw(m: *mut rte_mbuf) -> *mut u8 {
     unsafe {
         let raw = (*m).buf_addr as u64;
-        (raw - HEADROOM_STEAL as u64) as *mut u8
+        (raw + HEADROOM_STEAL as u64) as *mut u8
     }
 }
 
