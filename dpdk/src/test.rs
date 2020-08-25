@@ -12,7 +12,8 @@ use std::time;
 
 const NUM_PKTS: usize = 100;
 const NUM_PART: usize = 200;
-const MAX_PACKET: usize = 2048;
+const PART_SZ: usize = 2048;
+const MAX_PACKET: usize = 1500;
 
 fn packet_pool(test: &str) -> Box<dyn PacketPool> {
     let q = Arc::new(ArrayQueue::new(NUM_PKTS));
@@ -23,7 +24,7 @@ fn packet_pool(test: &str) -> Box<dyn PacketPool> {
         &mut counters,
         NUM_PKTS,
         NUM_PART,
-        MAX_PACKET,
+        PART_SZ,
     ))
 }
 
