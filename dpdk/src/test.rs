@@ -121,9 +121,22 @@ fn read_write() {
 
     let wait = Arc::new(AtomicUsize::new(0));
     let done = wait.clone();
-    let tname = "rx".to_string();
-    let handler = thread::Builder::new().name(tname).spawn(move || {
-        let pkt = dpdk_rx.recvmsg(&mut *pool_rx, 0).unwrap();
+    let tname = "dpdk_eal".to_string();
+    let handler = thread::Builder::new().name(tname).spawn(move || loop {
+        let data: Vec<u8> = (0..MAX_PACKET).map(|x| (x % 256) as u8).collect();
+        let pkt = pool_tx.pkt(0);
+        if pkt.is_none() {
+            panic!("Well, we shouldnt be running out of tx pkts")
+        }
+        let mut pkt = pkt.unwrap();
+        assert!(pkt.append(&mut *pool_tx, &data[0..]));
+        assert_eq!(dpdk_tx.sendmsg(pkt), MAX_PACKET);
+
+        let pkt = dpdk_rx.recvmsg(&mut *pool_rx, 0);
+        if pkt.is_none() {
+            continue;
+        }
+        let pkt = pkt.unwrap();
         let pktlen = pkt.len();
         assert_eq!(MAX_PACKET, pktlen);
         let (buf, len) = match pkt.data(0) {
@@ -137,11 +150,7 @@ fn read_write() {
         done.fetch_add(1, Ordering::Relaxed);
     });
 
-    let data: Vec<u8> = (0..MAX_PACKET).map(|x| (x % 256) as u8).collect();
     while wait.load(Ordering::Relaxed) == 0 {
-        let mut pkt = pool_tx.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool_tx, &data[0..]));
-        assert_eq!(dpdk_tx.sendmsg(pkt), MAX_PACKET);
         let wait = time::Duration::from_millis(1);
         thread::sleep(wait)
     }
