@@ -92,10 +92,10 @@ fn create_veth() {
 
 #[test]
 fn read_write() {
-    let mut glob = DpdkGlobal::new(128, 1);
-
     delete_veth();
     create_veth();
+
+    let mut glob = DpdkGlobal::new(128, 1);
 
     let mut pool_tx = packet_pool("dpdk_read_write_tx");
     let params = Params {
@@ -103,7 +103,7 @@ fn read_write() {
         hw: DpdkHw::AfPacket,
         pool: pool_tx.dpdk_pool,
     };
-    let dpdk_rx = match glob.add(params) {
+    let dpdk_tx = match glob.add(params) {
         Ok(dpdk) => dpdk,
         Err(err) => panic!("Error {:?} creating dpdk port", err),
     };
@@ -114,7 +114,7 @@ fn read_write() {
         hw: DpdkHw::AfPacket,
         pool: pool_rx.dpdk_pool,
     };
-    let dpdk_tx = match glob.add(params) {
+    let dpdk_rx = match glob.add(params) {
         Ok(dpdk) => dpdk,
         Err(err) => panic!("Error {:?} creating dpdk port", err),
     };
