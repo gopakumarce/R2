@@ -56,7 +56,11 @@ pub fn dpdk_mbuf_alloc(mp: *mut rte_mempool) -> Option<*mut rte_mbuf> {
         let ops: *mut rte_mempool_ops = &mut rte_mempool_ops_table.ops[(*mp).ops_index as usize];
         let cb = (*ops).dequeue.unwrap();
         cb(mp, &mut m, 1);
-        Some(m as *mut rte_mbuf)
+        if m != 0 as *mut libc::c_void {
+            Some(m as *mut rte_mbuf)
+        } else {
+            None
+        }
     }
 }
 
