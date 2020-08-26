@@ -190,10 +190,11 @@ pub struct Params<'a> {
 struct Dpdk {
     name: String,
     port: u16,
+    glob_idx: u16,
 }
 
 pub struct DpdkGlobal {
-    ports: u16,
+    index: u16,
 }
 
 impl DpdkGlobal {
@@ -201,18 +202,19 @@ impl DpdkGlobal {
         if let Err(err) = dpdk_init(mem_sz, ncores) {
             panic!("DPDK Init failed {}", err);
         }
-        DpdkGlobal { ports: 0 }
+        DpdkGlobal { index: 0 }
     }
 
     fn add(&mut self, params: Params) -> Result<Dpdk, PortInitErr> {
-        let port = self.ports;
+        let index = self.index;
         match params.hw {
-            DpdkHw::AfPacket => match dpdk_af_packet_init(params.name, port, params.pool) {
+            DpdkHw::AfPacket => match dpdk_af_packet_init(params.name, index, params.pool) {
                 Ok(port) => {
-                    self.ports += 1;
+                    self.index += 1;
                     Ok(Dpdk {
                         name: params.name.to_string(),
                         port,
+                        glob_idx: index,
                     })
                 }
                 Err(err) => Err(err),
@@ -329,7 +331,7 @@ fn dpdk_buffer_init(name: &str, nbufs: u32, buf_sz: u16) -> *mut rte_mempool {
 
 fn dpdk_port_cfg(port: u16) -> Result<(), PortInitErr> {
     unsafe {
-        let mut cfg: rte_eth_conf = mem::MaybeUninit::uninit().assume_init();
+        let mut cfg: rte_eth_conf = mem::MaybeUninit::zeroed().assume_init();
         cfg.rxmode.mq_mode = rte_eth_rx_mq_mode_ETH_MQ_RX_NONE;
         cfg.txmode.mq_mode = rte_eth_tx_mq_mode_ETH_MQ_TX_NONE;
         if rte_eth_dev_configure(port, 1, 1, &mut cfg) < 0 {
@@ -385,7 +387,7 @@ fn dpdk_port_probe(intf: &str, af_idx: u16) -> Result<u16, PortInitErr> {
     let args = cstr.as_ptr();
     unsafe {
         if rte_dev_probe(args) == 0 {
-            let mut iter: rte_dev_iterator = mem::MaybeUninit::uninit().assume_init();
+            let mut iter: rte_dev_iterator = mem::MaybeUninit::zeroed().assume_init();
             rte_eth_iterator_init(&mut iter, args);
             let mut id = rte_eth_iterator_next(&mut iter);
             while id != RTE_MAX_ETHPORTS as u16 {

@@ -12,7 +12,7 @@ use std::time;
 
 const NUM_PKTS: usize = 100;
 const NUM_PART: usize = 200;
-const PART_SZ: usize = 2048;
+const PART_SZ: usize = 3072;
 const MAX_PACKET: usize = 1500;
 
 fn packet_pool(test: &str) -> Box<PktsDpdk> {

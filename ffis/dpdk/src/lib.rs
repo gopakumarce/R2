@@ -14,9 +14,10 @@ include!("bindgen/include/lib.rs");
 // does not generate the bindings.
 pub fn dpdk_rx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u16 {
     unsafe {
-        let dev = &rte_eth_devices[port_id as usize];
-        let cb = dev.rx_pkt_burst.unwrap();
-        let ptr = (*dev.data).rx_queues.add(queue_id);
+        let devices = rte_eth_devices.as_ptr();
+        let dev = devices.add(port_id as usize);
+        let cb = (*dev).rx_pkt_burst.unwrap();
+        let ptr = (*(*dev).data).rx_queues.add(queue_id);
         cb(*ptr, mbuf, 1)
     }
 }
@@ -25,9 +26,10 @@ pub fn dpdk_rx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u
 // does not generate the bindings.
 pub fn dpdk_tx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) {
     unsafe {
-        let dev = &rte_eth_devices[port_id as usize];
-        let cb = dev.tx_pkt_burst.unwrap();
-        let ptr = (*dev.data).tx_queues.add(queue_id);
+        let devices = rte_eth_devices.as_ptr();
+        let dev = devices.add(port_id as usize);
+        let cb = (*dev).tx_pkt_burst.unwrap();
+        let ptr = (*(*dev).data).tx_queues.add(queue_id);
         cb(*ptr, mbuf, 1);
     }
 }

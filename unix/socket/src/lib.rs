@@ -21,12 +21,12 @@ impl Driver for RawSock {
         let mut pkt = pkt.unwrap();
         unsafe {
             let buf = pkt.head();
-            let mut iov: libc::iovec = mem::MaybeUninit::uninit().assume_init();
+            let mut iov: libc::iovec = mem::MaybeUninit::zeroed().assume_init();
             let head = buf.as_ptr() as u64 + pkt.headroom() as u64;
             iov.iov_base = head as *mut libc::c_void;
             iov.iov_len = buf.len() - pkt.headroom();
-            let mut cmsg: [u8; 32] = mem::MaybeUninit::uninit().assume_init();
-            let mut mhdr: libc::msghdr = mem::MaybeUninit::uninit().assume_init();
+            let mut cmsg: [u8; 32] = mem::MaybeUninit::zeroed().assume_init();
+            let mut mhdr: libc::msghdr = mem::MaybeUninit::zeroed().assume_init();
             mhdr.msg_name = ptr::null_mut();
             mhdr.msg_namelen = 0 as libc::socklen_t;
             mhdr.msg_iov = &mut iov;
@@ -45,13 +45,13 @@ impl Driver for RawSock {
     fn sendmsg(&self, pkt: BoxPkt) -> usize {
         unsafe {
             let slices = pkt.slices();
-            let iov: libc::iovec = mem::MaybeUninit::uninit().assume_init();
+            let iov: libc::iovec = mem::MaybeUninit::zeroed().assume_init();
             let mut iovec: Vec<libc::iovec> = vec![iov; slices.len()];
             for i in 0..slices.len() {
                 iovec[i].iov_base = slices[i].0.as_ptr() as *mut libc::c_void;
                 iovec[i].iov_len = slices[i].1;
             }
-            let mut mhdr: libc::msghdr = mem::MaybeUninit::uninit().assume_init();
+            let mut mhdr: libc::msghdr = mem::MaybeUninit::zeroed().assume_init();
             mhdr.msg_name = ptr::null_mut();
             mhdr.msg_namelen = 0 as libc::socklen_t;
             mhdr.msg_iov = iovec.as_mut_ptr();

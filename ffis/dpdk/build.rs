@@ -8,5 +8,6 @@ fn main() {
     println!("cargo:rustc-link-lib=rte_kvargs");
     println!("cargo:rustc-link-lib=rte_mempool");
     println!("cargo:rustc-link-lib=rte_mbuf");
+    println!("cargo:rustc-link-lib=rte_ethdev");
     println!("cargo:rerun-if-changed=build.rs");
 }
