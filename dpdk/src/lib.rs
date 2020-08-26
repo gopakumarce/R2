@@ -5,9 +5,10 @@ use dpdk_ffi::{
     dpdk_mbuf_alloc, dpdk_mbuf_free, dpdk_rx_one, dpdk_tx_one, rte_dev_iterator, rte_dev_probe,
     rte_eal_init, rte_eal_mp_remote_launch, rte_eth_conf, rte_eth_dev_configure,
     rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init, rte_eth_iterator_next,
-    rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup, rte_eth_tx_queue_setup, rte_mbuf,
-    rte_mempool, rte_mempool_obj_iter, rte_pktmbuf_pool_create, rte_rmt_call_master_t_SKIP_MASTER,
-    RTE_MAX_ETHPORTS, RTE_MEMPOOL_CACHE_MAX_SIZE, RTE_PKTMBUF_HEADROOM, SOCKET_ID_ANY,
+    rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup, rte_eth_tx_mq_mode_ETH_MQ_TX_NONE,
+    rte_eth_tx_queue_setup, rte_mbuf, rte_mempool, rte_mempool_obj_iter, rte_pktmbuf_pool_create,
+    rte_rmt_call_master_t_SKIP_MASTER, RTE_MAX_ETHPORTS, RTE_MEMPOOL_CACHE_MAX_SIZE,
+    RTE_PKTMBUF_HEADROOM, SOCKET_ID_ANY,
 };
 use graph::Driver;
 use packet::{BoxPart, BoxPkt, PacketPool};
@@ -21,13 +22,16 @@ use std::{mem, sync::Arc};
 const N_RX_DESC: u16 = 128;
 const N_TX_DESC: u16 = 128;
 
-struct PktsDpdk {
-    dpdk_pool: *mut rte_mempool,
+pub struct PktsDpdk {
+    pub dpdk_pool: *mut rte_mempool,
     alloc_fail: Counter,
     pkts: VecDeque<BoxPkt>,
     particle_sz: usize,
 }
 
+// The *mut rte_pool prevents a send, but we *know* that we are sending this from control thread that
+// creates the pool to data thread that then uses it, and the pools are valid no matter which thread
+// accesses it
 unsafe impl Send for PktsDpdk {}
 
 // NOTE: As of today R2 supports only single buffer dpdk packets. It is not very hard to extend
@@ -172,8 +176,50 @@ impl PacketPool for PktsDpdk {
     }
 }
 
-pub struct Dpdk {
-    port: usize,
+pub enum DpdkHw {
+    AfPacket,
+    PCI,
+}
+
+pub struct Params<'a> {
+    name: &'a str,
+    hw: DpdkHw,
+    pool: *mut rte_mempool,
+}
+
+struct Dpdk {
+    name: String,
+    port: u16,
+}
+
+pub struct DpdkGlobal {
+    ports: u16,
+}
+
+impl DpdkGlobal {
+    fn new(mem_sz: usize, ncores: usize) -> Self {
+        if let Err(err) = dpdk_init(mem_sz, ncores) {
+            panic!("DPDK Init failed {}", err);
+        }
+        DpdkGlobal { ports: 0 }
+    }
+
+    fn add(&mut self, params: Params) -> Result<Dpdk, PortInitErr> {
+        let port = self.ports;
+        match params.hw {
+            DpdkHw::AfPacket => match dpdk_af_packet_init(params.name, port, params.pool) {
+                Ok(port) => {
+                    self.ports += 1;
+                    Ok(Dpdk {
+                        name: params.name.to_string(),
+                        port,
+                    })
+                }
+                Err(err) => Err(err),
+            },
+            _ => Err(PortInitErr::UnknownHw),
+        }
+    }
 }
 
 impl Driver for Dpdk {
@@ -218,11 +264,14 @@ impl Driver for Dpdk {
         }
     }
 }
-pub enum port_init_err {
+
+#[derive(Debug)]
+pub enum PortInitErr {
     PROBE_FAIL,
     CONFIG_FAIL,
     QUEUE_FAIL,
     START_FAIL,
+    UnknownHw,
 }
 fn get_opt(opt: &str) -> *const libc::c_char {
     let cstr = CString::new(opt).unwrap();
@@ -278,12 +327,13 @@ fn dpdk_buffer_init(name: &str, nbufs: u32, buf_sz: u16) -> *mut rte_mempool {
     unsafe { rte_pktmbuf_pool_create(name, nbufs, 0, 0, buf_sz, SOCKET_ID_ANY) }
 }
 
-fn dpdk_port_cfg(port: u16) -> Result<(), port_init_err> {
+fn dpdk_port_cfg(port: u16) -> Result<(), PortInitErr> {
     unsafe {
         let mut cfg: rte_eth_conf = mem::MaybeUninit::uninit().assume_init();
         cfg.rxmode.mq_mode = rte_eth_rx_mq_mode_ETH_MQ_RX_NONE;
+        cfg.txmode.mq_mode = rte_eth_tx_mq_mode_ETH_MQ_TX_NONE;
         if rte_eth_dev_configure(port, 1, 1, &mut cfg) < 0 {
-            return Err(port_init_err::CONFIG_FAIL);
+            return Err(PortInitErr::CONFIG_FAIL);
         }
     }
     Ok(())
@@ -294,11 +344,11 @@ fn dpdk_queue_cfg(
     n_rxd: u16,
     n_txd: u16,
     pool: *mut rte_mempool,
-) -> Result<(), port_init_err> {
+) -> Result<(), PortInitErr> {
     unsafe {
         let socket = rte_eth_dev_socket_id(port);
         if socket < 0 {
-            return Err(port_init_err::CONFIG_FAIL);
+            return Err(PortInitErr::CONFIG_FAIL);
         }
         let ret = rte_eth_rx_queue_setup(
             port,
@@ -309,7 +359,7 @@ fn dpdk_queue_cfg(
             pool,
         );
         if ret != 0 {
-            return Err(port_init_err::QUEUE_FAIL);
+            return Err(PortInitErr::QUEUE_FAIL);
         }
         let ret = rte_eth_tx_queue_setup(
             port,
@@ -319,13 +369,13 @@ fn dpdk_queue_cfg(
             0 as *const dpdk_ffi::rte_eth_txconf,
         );
         if ret != 0 {
-            return Err(port_init_err::QUEUE_FAIL);
+            return Err(PortInitErr::QUEUE_FAIL);
         }
     }
     Ok(())
 }
 
-fn dpdk_port_probe(intf: &str, af_idx: isize) -> Result<u16, port_init_err> {
+fn dpdk_port_probe(intf: &str, af_idx: u16) -> Result<u16, PortInitErr> {
     let mut port: u16 = RTE_MAX_ETHPORTS as u16;
     let params = format!(
         "eth_af_packet{},iface={},blocksz=4096,framesz=2048,framecnt=2048,qpairs=1",
@@ -343,10 +393,10 @@ fn dpdk_port_probe(intf: &str, af_idx: isize) -> Result<u16, port_init_err> {
                 id = rte_eth_iterator_next(&mut iter);
             }
         } else {
-            return Err(port_init_err::PROBE_FAIL);
+            return Err(PortInitErr::PROBE_FAIL);
         }
         if port == RTE_MAX_ETHPORTS as u16 {
-            return Err(port_init_err::PROBE_FAIL);
+            return Err(PortInitErr::PROBE_FAIL);
         }
     }
     Ok(port)
@@ -354,9 +404,9 @@ fn dpdk_port_probe(intf: &str, af_idx: isize) -> Result<u16, port_init_err> {
 
 fn dpdk_af_packet_init(
     intf: &str,
-    af_idx: isize,
+    af_idx: u16,
     pool: *mut rte_mempool,
-) -> Result<u16, port_init_err> {
+) -> Result<u16, PortInitErr> {
     let mut port: u16 = RTE_MAX_ETHPORTS as u16;
     unsafe {
         match dpdk_port_probe(intf, af_idx) {
@@ -370,7 +420,7 @@ fn dpdk_af_packet_init(
             return Err(err);
         }
         if rte_eth_dev_start(port) < 0 {
-            return Err(port_init_err::START_FAIL);
+            return Err(PortInitErr::START_FAIL);
         }
     }
     Ok(port)

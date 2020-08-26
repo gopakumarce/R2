@@ -12,9 +12,9 @@ include!("bindgen/include/lib.rs");
 
 // This is rte_eth_rx_burst() which is declared as inline and hence bindgen
 // does not generate the bindings.
-pub fn dpdk_rx_one(port_id: usize, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u16 {
+pub fn dpdk_rx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u16 {
     unsafe {
-        let dev = &rte_eth_devices[port_id];
+        let dev = &rte_eth_devices[port_id as usize];
         let cb = dev.rx_pkt_burst.unwrap();
         let ptr = (*dev.data).rx_queues.add(queue_id);
         cb(*ptr, mbuf, 1)
@@ -23,9 +23,9 @@ pub fn dpdk_rx_one(port_id: usize, queue_id: usize, mbuf: *mut *mut rte_mbuf) ->
 
 // This is rte_eth_tx_burst() which is declared as inline and hence bindgen
 // does not generate the bindings.
-pub fn dpdk_tx_one(port_id: usize, queue_id: usize, mbuf: *mut *mut rte_mbuf) {
+pub fn dpdk_tx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) {
     unsafe {
-        let dev = &rte_eth_devices[port_id];
+        let dev = &rte_eth_devices[port_id as usize];
         let cb = dev.tx_pkt_burst.unwrap();
         let ptr = (*dev.data).tx_queues.add(queue_id);
         cb(*ptr, mbuf, 1);

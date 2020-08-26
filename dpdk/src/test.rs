@@ -15,7 +15,7 @@ const NUM_PART: usize = 200;
 const PART_SZ: usize = 2048;
 const MAX_PACKET: usize = 1500;
 
-fn packet_pool(test: &str) -> Box<dyn PacketPool> {
+fn packet_pool(test: &str) -> Box<PktsDpdk> {
     let q = Arc::new(ArrayQueue::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
     Box::new(PktsDpdk::new(
@@ -92,24 +92,38 @@ fn create_veth() {
 
 #[test]
 fn read_write() {
-    if let Err(ret) = dpdk_init(128, 1) {
-        panic!("dpdk_init failed {}", ret);
-    }
+    let mut glob = DpdkGlobal::new(128, 1);
 
     delete_veth();
     create_veth();
 
+    let mut pool_tx = packet_pool("dpdk_read_write_tx");
+    let params = Params {
+        name: "r2_eth1",
+        hw: DpdkHw::AfPacket,
+        pool: pool_tx.dpdk_pool,
+    };
+    let dpdk_rx = match glob.add(params) {
+        Ok(dpdk) => dpdk,
+        Err(err) => panic!("Error {:?} creating dpdk port", err),
+    };
+
+    let mut pool_rx = packet_pool("dpdk_read_write_rx");
+    let params = Params {
+        name: "r2_eth2",
+        hw: DpdkHw::AfPacket,
+        pool: pool_rx.dpdk_pool,
+    };
+    let dpdk_tx = match glob.add(params) {
+        Ok(dpdk) => dpdk,
+        Err(err) => panic!("Error {:?} creating dpdk port", err),
+    };
+
     let wait = Arc::new(AtomicUsize::new(0));
     let done = wait.clone();
     let tname = "rx".to_string();
-    let mut pool = packet_pool("dpdk_read_write_rx");
     let handler = thread::Builder::new().name(tname).spawn(move || {
-        let raw = match RawSock::new("r2_eth2", false) {
-            Ok(raw) => raw,
-            Err(errno) => panic!("Errno {} opening socket", errno),
-        };
-
-        let pkt = raw.recvmsg(&mut *pool, 0).unwrap();
+        let pkt = dpdk_rx.recvmsg(&mut *pool_rx, 0).unwrap();
         let pktlen = pkt.len();
         assert_eq!(MAX_PACKET, pktlen);
         let (buf, len) = match pkt.data(0) {
@@ -123,16 +137,11 @@ fn read_write() {
         done.fetch_add(1, Ordering::Relaxed);
     });
 
-    let raw = match RawSock::new("r2_eth1", false) {
-        Ok(raw) => raw,
-        Err(errno) => panic!("Errno {} opening socket", errno),
-    };
     let data: Vec<u8> = (0..MAX_PACKET).map(|x| (x % 256) as u8).collect();
-    let mut pool = packet_pool("dpdk_read_write_tx");
     while wait.load(Ordering::Relaxed) == 0 {
-        let mut pkt = pool.pkt(0).unwrap();
-        assert!(pkt.append(&mut *pool, &data[0..]));
-        assert_eq!(raw.sendmsg(pkt), MAX_PACKET);
+        let mut pkt = pool_tx.pkt(0).unwrap();
+        assert!(pkt.append(&mut *pool_tx, &data[0..]));
+        assert_eq!(dpdk_tx.sendmsg(pkt), MAX_PACKET);
         let wait = time::Duration::from_millis(1);
         thread::sleep(wait)
     }
