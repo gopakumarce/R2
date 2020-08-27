@@ -10,13 +10,18 @@ use std::sync::Arc;
 use std::thread;
 use std::time;
 
-const NUM_PKTS: usize = 100;
-const NUM_PART: usize = 200;
+const NUM_PKTS: usize = 10;
+const NUM_PART: usize = 20;
 const PART_SZ: usize = 3072;
 const MAX_PACKET: usize = 1500;
 
-fn packet_pool(test: &str) -> Box<PktsDpdk> {
-    let q = Arc::new(ArrayQueue::new(NUM_PKTS));
+fn packet_free(q: Arc<ArrayQueue<BoxPkt>>, pool: &mut dyn PacketPool) {
+    while let Ok(p) = q.pop() {
+        pool.free(p);
+    }
+}
+
+fn packet_pool(test: &str, q: Arc<ArrayQueue<BoxPkt>>) -> Box<PktsDpdk> {
     let mut counters = Counters::new(test).unwrap();
     Box::new(PktsDpdk::new(
         test,
@@ -97,7 +102,8 @@ fn read_write() {
 
     let mut glob = DpdkGlobal::new(128, 1);
 
-    let mut pool_tx = packet_pool("dpdk_read_write_tx");
+    let q_tx = Arc::new(ArrayQueue::new(NUM_PKTS));
+    let mut pool_tx = packet_pool("dpdk_read_write_tx", q_tx.clone());
     let params = Params {
         name: "r2_eth1",
         hw: DpdkHw::AfPacket,
@@ -108,7 +114,8 @@ fn read_write() {
         Err(err) => panic!("Error {:?} creating dpdk port", err),
     };
 
-    let mut pool_rx = packet_pool("dpdk_read_write_rx");
+    let q_rx = Arc::new(ArrayQueue::new(NUM_PKTS));
+    let mut pool_rx = packet_pool("dpdk_read_write_rx", q_rx.clone());
     let params = Params {
         name: "r2_eth2",
         hw: DpdkHw::AfPacket,
@@ -122,32 +129,36 @@ fn read_write() {
     let wait = Arc::new(AtomicUsize::new(0));
     let done = wait.clone();
     let tname = "dpdk_eal".to_string();
-    let handler = thread::Builder::new().name(tname).spawn(move || loop {
+    let handler = thread::Builder::new().name(tname).spawn(move || {
         let data: Vec<u8> = (0..MAX_PACKET).map(|x| (x % 256) as u8).collect();
-        let pkt = pool_tx.pkt(0);
-        if pkt.is_none() {
-            panic!("Well, we shouldnt be running out of tx pkts")
-        }
-        let mut pkt = pkt.unwrap();
-        assert!(pkt.append(&mut *pool_tx, &data[0..]));
-        assert_eq!(dpdk_tx.sendmsg(pkt), MAX_PACKET);
+        loop {
+            packet_free(q_rx.clone(), &mut *pool_rx);
+            packet_free(q_tx.clone(), &mut *pool_tx);
+            let pkt = pool_tx.pkt(0);
+            if pkt.is_none() {
+                continue;
+            }
+            let mut pkt = pkt.unwrap();
+            assert!(pkt.append(&mut *pool_tx, &data[0..]));
+            assert_eq!(dpdk_tx.sendmsg(pkt), MAX_PACKET);
 
-        let pkt = dpdk_rx.recvmsg(&mut *pool_rx, 0);
-        if pkt.is_none() {
-            continue;
+            let pkt = dpdk_rx.recvmsg(&mut *pool_rx, 0);
+            if pkt.is_none() {
+                continue;
+            }
+            let pkt = pkt.unwrap();
+            let pktlen = pkt.len();
+            assert_eq!(MAX_PACKET, pktlen);
+            let (buf, len) = match pkt.data(0) {
+                Some((d, s)) => (d, s),
+                None => panic!("Cant get offset 0"),
+            };
+            assert_eq!(len, pktlen);
+            for i in 0..MAX_PACKET {
+                assert_eq!(buf[i], i as u8);
+            }
+            done.fetch_add(1, Ordering::Relaxed);
         }
-        let pkt = pkt.unwrap();
-        let pktlen = pkt.len();
-        assert_eq!(MAX_PACKET, pktlen);
-        let (buf, len) = match pkt.data(0) {
-            Some((d, s)) => (d, s),
-            None => panic!("Cant get offset 0"),
-        };
-        assert_eq!(len, pktlen);
-        for i in 0..MAX_PACKET {
-            assert_eq!(buf[i], i as u8);
-        }
-        done.fetch_add(1, Ordering::Relaxed);
     });
 
     while wait.load(Ordering::Relaxed) == 0 {

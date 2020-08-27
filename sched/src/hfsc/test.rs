@@ -12,8 +12,13 @@ const PKT_TIME: u64 = PKTSZ as u64 * 8 * 1_000_000_000 / (1024 * 1024);
 const NUM_PKTS: usize = 4096;
 const NUM_PART: usize = 2 * 4096;
 
-fn packet_pool(test: &str) -> Box<dyn PacketPool> {
-    let q = Arc::new(ArrayQueue::<BoxPkt>::new(NUM_PKTS));
+fn packet_free(q: Arc<ArrayQueue<BoxPkt>>, pool: &mut dyn PacketPool) {
+    while let Ok(p) = q.pop() {
+        pool.free(p);
+    }
+}
+
+fn packet_pool(test: &str, q: Arc<ArrayQueue<BoxPkt>>) -> Box<dyn PacketPool> {
     let mut counters = Counters::new(test).unwrap();
     Box::new(PktsHeap::new(
         "PKTS_HEAP",
@@ -28,7 +33,8 @@ fn packet_pool(test: &str) -> Box<dyn PacketPool> {
 // Create two classes with bandwidth ratio 1:10
 #[test]
 fn one_level_linkshare() {
-    let mut pool = packet_pool("hfsc_1lvl_lshare");
+    let q = Arc::new(ArrayQueue::new(NUM_PKTS));
+    let mut pool = packet_pool("hfsc_1lvl_lshare", q.clone());
     let f_sc_10mb = Sc {
         m1: 0,
         d: 0,
@@ -108,6 +114,9 @@ fn one_level_linkshare() {
             assert_eq!(hfsc.classes[hfsc.root].children.len(), 1);
         }
     }
+
+    packet_free(q, &mut *pool);
+
     assert_eq!(hfsc.classes[hfsc.root].children.len(), 0);
     assert_eq!(hfsc.eligible.len(), 0);
     assert_eq!(class1_pkts, 512);
@@ -121,7 +130,8 @@ fn one_level_linkshare() {
 // l1_c2_l2_c1:l1_c2_l2_c2 is ratio 10:1
 #[test]
 fn two_level_linkshare() {
-    let mut pool = packet_pool("hfsc_2lvl_lshare");
+    let q = Arc::new(ArrayQueue::new(NUM_PKTS));
+    let mut pool = packet_pool("hfsc_2lvl_lshare", q.clone());
     let f_sc_10mb = Sc {
         m1: 0,
         d: 0,
@@ -304,6 +314,8 @@ fn two_level_linkshare() {
         }
     }
 
+    packet_free(q, &mut *pool);
+
     assert_eq!(l1_c1_pkts, 512 * 2);
     assert_eq!(l1_c1_l2_c1_pkts, 512);
     assert_eq!(l1_c1_l2_c2_pkts, 512);
@@ -333,7 +345,8 @@ fn test_get_time_ns() -> u64 {
 // if the realtime sessions are lagging behind in time
 #[test]
 fn single_level_realtime() {
-    let mut pool = packet_pool("hfsc_1lvl_rt");
+    let q = Arc::new(ArrayQueue::new(NUM_PKTS));
+    let mut pool = packet_pool("hfsc_1lvl_rt", q.clone());
     let f_sc_10mb = Sc {
         m1: 0,
         d: 0,
@@ -468,6 +481,9 @@ fn single_level_realtime() {
             }
         }
     }
+
+    packet_free(q, &mut *pool);
+
     assert_eq!(hfsc.classes[hfsc.root].children.len(), 0);
     assert_eq!(hfsc.eligible.len(), 0);
 }
