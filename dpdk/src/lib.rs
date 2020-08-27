@@ -246,6 +246,9 @@ impl Driver for Dpdk {
                 let partptr: *mut *mut u8 = mbufptr as *mut *mut u8;
                 let mut part = BoxPart::new(*partptr, mbuf_to_raw(m), pool.particle_sz());
                 assert_eq!((*m).data_off, RTE_PKTMBUF_HEADROOM as u16);
+                // Remember, the first two words from mbuf->buf_addr are used up for storing
+                // mbuf pointer and particle pointer, and the particle data starts after that.
+                // So the headroom is lower than dpdk headroom by those two words
                 part.reinit(HEADROOM);
                 if let Some(mut pkt) = pool.pkt_with_particles(part) {
                     let len = ((*m).data_len as usize) as isize;
