@@ -2,13 +2,12 @@ use counters::flavors::{Counter, CounterType};
 use counters::Counters;
 use crossbeam_queue::ArrayQueue;
 use dpdk_ffi::{
-    dpdk_mbuf_alloc, dpdk_mbuf_free, dpdk_rx_one, dpdk_tx_one, rte_dev_iterator, rte_dev_probe,
-    rte_eal_init, rte_eal_mp_remote_launch, rte_eth_conf, rte_eth_dev_configure,
+    dpdk_mbuf_alloc, dpdk_mbuf_free, dpdk_rx_one, dpdk_tx_one, lcore_function_t, rte_dev_iterator,
+    rte_dev_probe, rte_eal_init, rte_eal_mp_remote_launch, rte_eth_conf, rte_eth_dev_configure,
     rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init, rte_eth_iterator_next,
     rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup, rte_eth_tx_mq_mode_ETH_MQ_TX_NONE,
     rte_eth_tx_queue_setup, rte_mbuf, rte_mempool, rte_mempool_obj_iter, rte_pktmbuf_pool_create,
-    rte_rmt_call_master_t_SKIP_MASTER, RTE_MAX_ETHPORTS, RTE_MEMPOOL_CACHE_MAX_SIZE,
-    RTE_PKTMBUF_HEADROOM, SOCKET_ID_ANY,
+    rte_rmt_call_master_t_SKIP_MASTER, RTE_MAX_ETHPORTS, RTE_PKTMBUF_HEADROOM, SOCKET_ID_ANY,
 };
 use graph::Driver;
 use packet::{BoxPart, BoxPkt, PacketPool};
@@ -289,7 +288,7 @@ fn dpdk_init(mem_sz: usize, _ncores: usize) -> Result<(), i32> {
         get_opt(&format!("{}", mem_sz)),
         get_opt("--no-huge"),
         get_opt("--no-pci"),
-        get_opt("--lcores=0"),
+        get_opt("--lcores=0,1"),
         get_opt("--master-lcore=0"),
         //get_opt("--log-level=*:8"),
     ];
@@ -308,17 +307,9 @@ fn dpdk_init(mem_sz: usize, _ncores: usize) -> Result<(), i32> {
     }
 }
 
-extern "C" fn dpdk_thread(arg: *mut core::ffi::c_void) -> i32 {
-    0
-}
-
-fn dpdk_launch() {
+fn dpdk_launch(dpdk_thread: lcore_function_t, arg: *mut core::ffi::c_void) {
     unsafe {
-        rte_eal_mp_remote_launch(
-            Some(dpdk_thread),
-            0 as *mut core::ffi::c_void,
-            rte_rmt_call_master_t_SKIP_MASTER,
-        );
+        rte_eal_mp_remote_launch(dpdk_thread, arg, rte_rmt_call_master_t_SKIP_MASTER);
     }
 }
 

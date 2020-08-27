@@ -95,6 +95,56 @@ fn create_veth() {
         .unwrap();
 }
 
+struct DpdkThread {
+    pool_rx: Box<PktsDpdk>,
+    pool_tx: Box<PktsDpdk>,
+    q_rx: Arc<ArrayQueue<BoxPkt>>,
+    q_tx: Arc<ArrayQueue<BoxPkt>>,
+    dpdk_rx: Dpdk,
+    dpdk_tx: Dpdk,
+    done: Arc<AtomicUsize>,
+}
+
+extern "C" fn dpdk_eal_thread(arg: *mut core::ffi::c_void) -> i32 {
+    unsafe {
+        let params: Box<DpdkThread> = Box::from_raw(arg as *mut DpdkThread);
+        dpdk_thread(params);
+        0
+    }
+}
+
+fn dpdk_thread(mut params: Box<DpdkThread>) {
+    let data: Vec<u8> = (0..MAX_PACKET).map(|x| (x % 256) as u8).collect();
+    loop {
+        packet_free(params.q_rx.clone(), &mut *params.pool_rx);
+        packet_free(params.q_tx.clone(), &mut *params.pool_tx);
+        let pkt = params.pool_tx.pkt(0);
+        if pkt.is_none() {
+            continue;
+        }
+        let mut pkt = pkt.unwrap();
+        assert!(pkt.append(&mut *params.pool_tx, &data[0..]));
+        assert_eq!(params.dpdk_tx.sendmsg(pkt), MAX_PACKET);
+
+        let pkt = params.dpdk_rx.recvmsg(&mut *params.pool_rx, 0);
+        if pkt.is_none() {
+            continue;
+        }
+        let pkt = pkt.unwrap();
+        let pktlen = pkt.len();
+        assert_eq!(MAX_PACKET, pktlen);
+        let (buf, len) = match pkt.data(0) {
+            Some((d, s)) => (d, s),
+            None => panic!("Cant get offset 0"),
+        };
+        assert_eq!(len, pktlen);
+        for i in 0..MAX_PACKET {
+            assert_eq!(buf[i], i as u8);
+        }
+        params.done.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
 #[test]
 fn read_write() {
     delete_veth();
@@ -103,7 +153,7 @@ fn read_write() {
     let mut glob = DpdkGlobal::new(128, 1);
 
     let q_tx = Arc::new(ArrayQueue::new(NUM_PKTS));
-    let mut pool_tx = packet_pool("dpdk_read_write_tx", q_tx.clone());
+    let pool_tx = packet_pool("dpdk_read_write_tx", q_tx.clone());
     let params = Params {
         name: "r2_eth1",
         hw: DpdkHw::AfPacket,
@@ -115,7 +165,7 @@ fn read_write() {
     };
 
     let q_rx = Arc::new(ArrayQueue::new(NUM_PKTS));
-    let mut pool_rx = packet_pool("dpdk_read_write_rx", q_rx.clone());
+    let pool_rx = packet_pool("dpdk_read_write_rx", q_rx.clone());
     let params = Params {
         name: "r2_eth2",
         hw: DpdkHw::AfPacket,
@@ -128,44 +178,26 @@ fn read_write() {
 
     let wait = Arc::new(AtomicUsize::new(0));
     let done = wait.clone();
-    let tname = "dpdk_eal".to_string();
-    let handler = thread::Builder::new().name(tname).spawn(move || {
-        let data: Vec<u8> = (0..MAX_PACKET).map(|x| (x % 256) as u8).collect();
-        loop {
-            packet_free(q_rx.clone(), &mut *pool_rx);
-            packet_free(q_tx.clone(), &mut *pool_tx);
-            let pkt = pool_tx.pkt(0);
-            if pkt.is_none() {
-                continue;
-            }
-            let mut pkt = pkt.unwrap();
-            assert!(pkt.append(&mut *pool_tx, &data[0..]));
-            assert_eq!(dpdk_tx.sendmsg(pkt), MAX_PACKET);
 
-            let pkt = dpdk_rx.recvmsg(&mut *pool_rx, 0);
-            if pkt.is_none() {
-                continue;
-            }
-            let pkt = pkt.unwrap();
-            let pktlen = pkt.len();
-            assert_eq!(MAX_PACKET, pktlen);
-            let (buf, len) = match pkt.data(0) {
-                Some((d, s)) => (d, s),
-                None => panic!("Cant get offset 0"),
-            };
-            assert_eq!(len, pktlen);
-            for i in 0..MAX_PACKET {
-                assert_eq!(buf[i], i as u8);
-            }
-            done.fetch_add(1, Ordering::Relaxed);
-        }
+    let params = Box::new(DpdkThread {
+        pool_rx,
+        pool_tx,
+        q_rx,
+        q_tx,
+        dpdk_rx,
+        dpdk_tx,
+        done,
     });
+
+    dpdk_launch(
+        Some(dpdk_eal_thread),
+        Box::into_raw(params) as *mut core::ffi::c_void,
+    );
 
     while wait.load(Ordering::Relaxed) == 0 {
         let wait = time::Duration::from_millis(1);
         thread::sleep(wait)
     }
 
-    handler.unwrap().join().unwrap();
     delete_veth();
 }
