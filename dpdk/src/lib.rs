@@ -145,10 +145,12 @@ impl PacketPool for PktsDpdk {
     }
 
     fn free_pkt(&mut self, pkt: BoxPkt) {
+        assert!(!pkt.has_part());
         self.pkts.push_front(pkt);
     }
 
     fn free_part(&mut self, part: BoxPart) {
+        assert!(!part.has_next());
         unsafe {
             let mut partptr: *const *mut u8 = part.data_raw(0).as_ptr() as *const *mut u8;
             partptr = partptr.sub(1);
@@ -229,6 +231,9 @@ impl Driver for Dpdk {
     }
 
     fn recvmsg(&self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt> {
+        if headroom > HEADROOM {
+            return None;
+        }
         let mut m: *mut rte_mbuf = 0 as *mut rte_mbuf;
         let nrx = dpdk_rx_one(self.port, 0, &mut m);
         if nrx == 0 {
@@ -240,21 +245,36 @@ impl Driver for Dpdk {
                 mbufptr = mbufptr.add(1);
                 let partptr: *mut *mut u8 = mbufptr as *mut *mut u8;
                 let mut part = BoxPart::new(*partptr, mbuf_to_raw(m), pool.particle_sz());
-                part.reinit(headroom);
-                pool.pkt_with_particles(part)
+                assert_eq!((*m).data_off, RTE_PKTMBUF_HEADROOM as u16);
+                part.reinit(HEADROOM);
+                if let Some(mut pkt) = pool.pkt_with_particles(part) {
+                    let len = ((*m).data_len as usize) as isize;
+                    if pkt.move_tail(len) == len {
+                        Some(pkt)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
             }
         }
     }
 
     fn sendmsg(&self, mut pkt: BoxPkt) -> usize {
         unsafe {
-            let len = pkt.len();
             let m = pkt.head_mut().as_mut_ptr();
             let mut partptr: *mut *mut u8 = m as *mut *mut u8;
             partptr = partptr.sub(1);
             let mut mbufptr: *mut *mut rte_mbuf = partptr as *mut *mut rte_mbuf;
             mbufptr = mbufptr.sub(1);
             let mut mbuf: *mut rte_mbuf = *mbufptr;
+            let data = pkt.data(0).unwrap().0.as_ptr() as u64;
+            let head = (*mbuf).buf_addr as u64;
+            (*mbuf).data_off = (data - head) as u16;
+            let len = pkt.len();
+            (*mbuf).data_len = len as u16;
+            (*mbuf).pkt_len = len as u32;
             // As soon as pkt goes out of scope, rust will free it, so we need to bump up refcnt
             // so that dpdk still has valid mbuf with it. We are not using any atomic ops here
             // because we use one pool per thread.
@@ -374,10 +394,7 @@ fn dpdk_queue_cfg(
 
 fn dpdk_port_probe(intf: &str, af_idx: u16) -> Result<u16, PortInitErr> {
     let mut port: u16 = RTE_MAX_ETHPORTS as u16;
-    let params = format!(
-        "eth_af_packet{},iface={},blocksz=4096,framesz=2048,framecnt=2048,qpairs=1",
-        af_idx, intf
-    );
+    let params = format!("eth_af_packet{},iface={}", af_idx, intf);
     let cstr = CString::new(params).unwrap();
     let args = cstr.as_ptr();
     unsafe {

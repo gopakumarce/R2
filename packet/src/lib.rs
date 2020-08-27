@@ -172,13 +172,15 @@ pub trait PacketPool: Send {
     fn pkt(&mut self, headroom: usize) -> Option<BoxPkt>;
     /// Allocate a particle (with the raw data), again expect allocation failure
     fn particle(&mut self, headroom: usize) -> Option<BoxPart>;
-    /// Free a packet which has a single particle with it
+    /// Free a packet with no particles in it
     fn free_pkt(&mut self, pkt: BoxPkt);
-    /// Free a particle
+    /// Free a single particle
     fn free_part(&mut self, part: BoxPart);
     /// Return the fixed max-size of the particle's raw data buffer
     fn particle_sz(&self) -> usize;
 
+    // Free a packet with multiple particles in it, at the end all the particles and
+    // the packet both gets freed
     fn free(&mut self, mut pkt: BoxPkt) {
         let mut part = pkt.particle.take();
         while let Some(mut p) = part {
@@ -196,7 +198,8 @@ pub trait PacketPool: Send {
 
     // This is an optional method and used only when interacting with third party libraries
     // like dpdk that have pool management of their own, this will be called only from drivers
-    // (like dpdk), apps/gnodes are NOT supposed to call this
+    // (like dpdk), apps/gnodes are NOT supposed to call this.
+    // NOTE: If this API is unable to return Some(BoxPkt), it should free the BoxPart _part
     fn pkt_with_particles(&mut self, _part: BoxPart) -> Option<BoxPkt> {
         None
     }
@@ -289,10 +292,12 @@ impl PacketPool for PktsHeap {
     }
 
     fn free_pkt(&mut self, pkt: BoxPkt) {
+        assert!(!pkt.has_part());
         self.pkts.push_front(pkt);
     }
 
     fn free_part(&mut self, part: BoxPart) {
+        assert!(!part.has_next());
         self.particles.push_front(part);
     }
 
@@ -316,6 +321,10 @@ pub struct Particle {
 impl Particle {
     fn len(&self) -> usize {
         self.tail - self.head
+    }
+
+    pub fn has_next(&self) -> bool {
+        self.next.is_some()
     }
 
     fn data(&self, offset: usize) -> Option<(&[u8], usize)> {
@@ -477,6 +486,10 @@ impl Packet {
 
     pub fn len(&self) -> usize {
         self.length
+    }
+
+    pub fn has_part(&self) -> bool {
+        self.particle.is_some()
     }
 
     pub fn headroom(&self) -> usize {
