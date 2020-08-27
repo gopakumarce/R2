@@ -24,13 +24,13 @@ pub fn dpdk_rx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u
 
 // This is rte_eth_tx_burst() which is declared as inline and hence bindgen
 // does not generate the bindings.
-pub fn dpdk_tx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) {
+pub fn dpdk_tx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u16 {
     unsafe {
         let devices = rte_eth_devices.as_ptr();
         let dev = devices.add(port_id as usize);
         let cb = (*dev).tx_pkt_burst.unwrap();
         let ptr = (*(*dev).data).tx_queues.add(queue_id);
-        cb(*ptr, mbuf, 1);
+        cb(*ptr, mbuf, 1)
     }
 }
 

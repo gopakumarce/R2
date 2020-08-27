@@ -260,8 +260,12 @@ impl Driver for Dpdk {
             // because we use one pool per thread.
             (*mbuf).__bindgen_anon_2.refcnt_atomic.cnt =
                 (*mbuf).__bindgen_anon_2.refcnt_atomic.cnt + 1;
-            dpdk_tx_one(self.port, 0, &mut mbuf);
-            len
+            if dpdk_tx_one(self.port, 0, &mut mbuf) != 1 {
+                dpdk_mbuf_free(mbuf);
+                0
+            } else {
+                len
+            }
         }
     }
 }
