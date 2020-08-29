@@ -375,6 +375,7 @@ dependencies = [
  "common 0.1.0",
  "counters 0.1.0",
  "crossbeam-queue 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "dpdk 0.1.0",
  "efd 0.1.0",
  "epoll 0.1.0",
  "fwd 0.1.0",

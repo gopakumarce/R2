@@ -188,7 +188,7 @@ pub struct Params<'a> {
     pool: *mut rte_mempool,
 }
 
-struct Dpdk {
+pub struct Dpdk {
     name: String,
     port: u16,
     glob_idx: u16,
@@ -308,7 +308,7 @@ fn get_opt(opt: &str) -> *const libc::c_char {
     ptr
 }
 
-fn dpdk_init(mem_sz: usize, _ncores: usize) -> Result<(), i32> {
+pub fn dpdk_init(mem_sz: usize, _ncores: usize) -> Result<(), i32> {
     let mut argv = vec![
         get_opt("r2"),
         get_opt("-m"),
@@ -334,13 +334,13 @@ fn dpdk_init(mem_sz: usize, _ncores: usize) -> Result<(), i32> {
     }
 }
 
-fn dpdk_launch(dpdk_thread: lcore_function_t, arg: *mut core::ffi::c_void) {
+pub fn dpdk_launch(dpdk_thread: lcore_function_t, arg: *mut core::ffi::c_void) {
     unsafe {
         rte_eal_mp_remote_launch(dpdk_thread, arg, rte_rmt_call_master_t_SKIP_MASTER);
     }
 }
 
-fn dpdk_buffer_init(name: &str, nbufs: u32, buf_sz: u16) -> *mut rte_mempool {
+pub fn dpdk_buffer_init(name: &str, nbufs: u32, buf_sz: u16) -> *mut rte_mempool {
     let cstr = CString::new(name).unwrap();
     let name = cstr.as_ptr();
     mem::forget(cstr);

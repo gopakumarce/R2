@@ -14,6 +14,7 @@ names = { path = "../names" }
 api = { path = "../api" }
 sched = { path = "../sched" }
 socket = { path = "../unix/socket" }
+dpdk = { path = "../dpdk" }
 epoll = { path = "../unix/epoll" }
 efd = { path = "../unix/efd" }
 counters = { path = "../counters" }

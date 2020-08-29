@@ -26,6 +26,7 @@ use msgs::{ctrl2fwd_messages, fwd2ctrl_messages};
 mod logs;
 use logs::LogApis;
 mod pkts;
+use dpdk::dpdk_launch;
 use perf::Perf;
 
 const THREADS: usize = 2;
@@ -48,6 +49,7 @@ pub struct R2 {
     threads: Vec<R2PerThread>,
     ifd: IfdCtx,
     ipv4: IPv4Ctx,
+    dpdk: bool,
 }
 
 impl R2 {
@@ -88,6 +90,7 @@ impl R2 {
             threads,
             ifd: IfdCtx::new(),
             ipv4: IPv4Ctx::new(),
+            dpdk: false,
         }
     }
 
@@ -167,28 +170,15 @@ fn register_apis(r2: Arc<Mutex<R2>>) -> ApiSvr {
     svr
 }
 
-// Create one forwarding thread. Each forwarding thread needs its own epoller to be woken up
-// when the thread's interfaces have pending I/O, and also to be woken up for example when
-// another thread wants to send packets via an interface this thread owns, and also woken up
-// when control thread wants to send a message to this forwarding thread.
-// NOTE: The model here is an epoll driven wakeup model - but once we have tight polling
-// drivers lke DPDK integrated, this model will change - maybe epoll wait will be taken out
-fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
-    // Channel to talk to and from control plane
-    let (sender, receiver) = channel();
-    // This is the descriptor used to wakeup the thread in genenarl, ie unlreated to any
-    // interface I/O - like when theres a control message to this thread etc..
-    let efd = r2.threads[thread].efd.clone();
-    let mut epoll = Epoll::new(efd, MAX_FDS, -1, Box::new(R2Epoll {})).unwrap();
-    r2.threads[thread].ctrl2fwd = Some(sender);
-    // The poll_fds are the descriptors that we know of at the moment (if any), when the
-    // thread is getting launched. When interfaces are created later, they will come up
-    // with their own descriptors.
-    for fd in r2.threads[thread].poll_fds.iter() {
-        epoll.add(*fd, EPOLLIN);
-    }
+struct ThreadParams {
+    thread: usize,
+    epoll: Epoll,
+    receiver: Receiver<R2Msg>,
+    g: Graph<R2Msg>,
+}
 
-    let name = format!("r2-{}", thread);
+fn launch_pthread(mut t: Box<ThreadParams>) {
+    let name = format!("r2-{}", t.thread);
     thread::Builder::new()
         .name(name)
         .spawn(move || loop {
@@ -197,16 +187,81 @@ fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
             // if the scheduler has work to be done at a future time in which case we can yield
             // till that time.
             while work {
-                let (w, _) = g.run();
+                let (w, _) = t.g.run();
                 work = w;
                 // interleave packet forwarding with checking for control messages, depending
                 // on performance measurements, this can be done (much) less frequently
-                ctrl2fwd_messages(thread, &mut epoll, &receiver, &mut g);
+                ctrl2fwd_messages(t.thread, &mut t.epoll, &t.receiver, &mut t.g);
             }
             // No more packets or control messages to process, sleep till someone wakes us up
-            epoll.wait();
+            t.epoll.wait();
         })
         .unwrap();
+}
+
+fn launch_dpdk_thread(t: Box<ThreadParams>) {
+    dpdk_launch(
+        Some(dpdk_eal_thread),
+        Box::into_raw(t) as *mut core::ffi::c_void,
+    );
+}
+
+extern "C" fn dpdk_eal_thread(arg: *mut core::ffi::c_void) -> i32 {
+    unsafe {
+        let t: Box<ThreadParams> = Box::from_raw(arg as *mut ThreadParams);
+        dpdk_thread(t);
+        0
+    }
+}
+
+fn dpdk_thread(mut t: Box<ThreadParams>) {
+    loop {
+        let mut work = true;
+        // For now we dont honor the 'time' parameter here, which mostly comes into play
+        // if the scheduler has work to be done at a future time in which case we can yield
+        // till that time.
+        while work {
+            let (w, _) = t.g.run();
+            work = w;
+            // interleave packet forwarding with checking for control messages, depending
+            // on performance measurements, this can be done (much) less frequently
+            ctrl2fwd_messages(t.thread, &mut t.epoll, &t.receiver, &mut t.g);
+        }
+    }
+}
+
+// Create one forwarding thread. Each forwarding thread needs its own epoller to be woken up
+// when the thread's interfaces have pending I/O, and also to be woken up for example when
+// another thread wants to send packets via an interface this thread owns, and also woken up
+// when control thread wants to send a message to this forwarding thread.
+// NOTE: The model here is an epoll driven wakeup model - but once we have tight polling
+// drivers lke DPDK integrated, this model will change - maybe epoll wait will be taken out
+fn create_thread(r2: &mut R2, g: Graph<R2Msg>, thread: usize) {
+    // Channel to talk to and from control plane
+    let (sender, receiver) = channel();
+    // This is the descriptor used to wakeup the thread in genenarl, ie unlreated to any
+    // interface I/O - like when theres a control message to this thread etc..
+    let efd = r2.threads[thread].efd.clone();
+    let epoll = Epoll::new(efd, MAX_FDS, -1, Box::new(R2Epoll {})).unwrap();
+    r2.threads[thread].ctrl2fwd = Some(sender);
+    // The poll_fds are the descriptors that we know of at the moment (if any), when the
+    // thread is getting launched. When interfaces are created later, they will come up
+    // with their own descriptors.
+    for fd in r2.threads[thread].poll_fds.iter() {
+        epoll.add(*fd, EPOLLIN);
+    }
+    let t = Box::new(ThreadParams {
+        thread,
+        epoll,
+        receiver,
+        g,
+    });
+
+    if r2.dpdk {
+        launch_dpdk_thread(t);
+    } else {
+        launch_pthread(t);
+    }
 }
 
 fn launch_threads(r2: &mut R2, graph: Graph<R2Msg>) {
