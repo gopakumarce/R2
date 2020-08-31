@@ -35,7 +35,7 @@ fn next_name(ifindex: usize, next: Next) -> String {
 // interface. All other threads handoff packets to the 'owner' vis MPSC 'thread_q'
 pub struct IfNode {
     name: String,
-    thread_mask: u64,
+    affinity: usize,
     intf: Arc<Interface>,
     sched: Hfsc,
     driver: Option<Box<dyn Driver + Send>>,
@@ -46,12 +46,12 @@ pub struct IfNode {
 }
 
 impl IfNode {
-    // thread_mask: specifies which thread owns the IfNode, we expect only one bit set in the mask
+    // affinity: specifies which thread owns the IfNode
     // efd: event fd (efd) used to wakeup the owner thread when handing off packets on thread_q
     // intf: The common driver-agnostic parameters of an interface like ip address/mtu etc..
     pub fn new(
         counters: &mut Counters,
-        thread_mask: u64,
+        affinity: usize,
         efd: Arc<Efd>,
         intf: Arc<Interface>,
         driver: Box<dyn Driver + Send>,
@@ -64,7 +64,7 @@ impl IfNode {
         let threadq_fail = Counter::new(counters, &name, CounterType::Error, "threadq_fail");
         Ok(IfNode {
             name,
-            thread_mask,
+            affinity,
             intf,
             sched,
             driver: Some(driver),
@@ -106,7 +106,7 @@ impl Gclient<R2Msg> for IfNode {
         let threadq_fail = Counter::new(counters, &self.name, CounterType::Error, "threadq_fail");
         Box::new(IfNode {
             name: self.name.clone(),
-            thread_mask: self.thread_mask,
+            affinity: self.affinity,
             intf: self.intf.clone(),
             sched,
             driver: None,
@@ -118,7 +118,7 @@ impl Gclient<R2Msg> for IfNode {
     }
 
     fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
-        let owner_thread = (self.thread_mask & (1 << thread)) != 0;
+        let owner_thread = self.affinity == thread;
         // Do packet Tx if we are the owner thread (thread the driver/device is pinnned to).
         // If so send the packet out on the driver, otherwise enqueue the packet to the MPSC
         // queue to the owner thread
@@ -173,7 +173,7 @@ impl Gclient<R2Msg> for IfNode {
                 self.intf = mod_intf.intf;
             }
             R2Msg::ClassAdd(class) => {
-                if (self.thread_mask & (1 << thread)) != 0
+                if (self.affinity == thread)
                     && self
                         .sched
                         .create_class(

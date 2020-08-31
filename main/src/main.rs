@@ -105,10 +105,18 @@ impl R2 {
         }
     }
 
-    // broadcast a message to all forwarding threads. Theres no API today to send a message
-    // to just one forwarding thread although its no big deal to do that - but the goal is
-    // to try and avoid that as much as possible and not have 'thread awareness' sprinkled
-    // all throughout the code
+    fn unicast(&mut self, msg: R2Msg, idx: usize) {
+        let t = &self.threads[idx];
+        if let Some(s) = &t.ctrl2fwd {
+            s.send(msg).unwrap();
+        }
+        t.efd.write(1);
+    }
+
+    // broadcast a message to all forwarding threads. The expectation is that everyone will
+    // use broadcast because everyone will just want to send the exact same message to all
+    // threads. But there can be exceptions like drivers which might want to send messages
+    // specific to a thread, and those rare exceptions will use unicast() above
     fn broadcast(&mut self, msg: R2Msg) {
         for t in self.threads.iter() {
             if let Some(s) = &t.ctrl2fwd {

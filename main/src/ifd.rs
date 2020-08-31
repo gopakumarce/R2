@@ -149,7 +149,6 @@ pub fn create_interface_node(
     // We simply spread interfaces across threads, a better strategy might be needed going foward
     let thread = r2.ifd.last_thread;
     r2.ifd.last_thread = (thread + 1) % r2.nthreads;
-    let thread_mask = 1 << thread;
     let efd = r2.threads[thread].efd.clone();
     let intf;
     if r2.dpdk.on {
@@ -163,7 +162,7 @@ pub fn create_interface_node(
         };
         intf = match IfNode::new(
             &mut r2.counters,
-            thread_mask,
+            thread,
             efd,
             interface.clone(),
             Box::new(dpdk),
@@ -178,7 +177,7 @@ pub fn create_interface_node(
         };
         intf = match IfNode::new(
             &mut r2.counters,
-            thread_mask,
+            thread,
             efd,
             interface.clone(),
             Box::new(sock),
@@ -190,16 +189,16 @@ pub fn create_interface_node(
     // If the interface has file descriptors that indicate I/O readiness, we add it to the
     // list of descriptors we are polling on. Every forwarding thread is polling on its own
     // set of descriptors, every thread will receive this message, but only the ones marked
-    // in thread_mask will add the fd to its epoll
+    // in 'thread' will add the fd to its epoll
     let msg = EpollAddMsg {
         fd: intf.fd(),
-        thread_mask,
+        thread,
     };
     let msg = R2Msg::EpollAdd(msg);
     r2.broadcast(msg);
 
-    // Broadcast a message and ask every forwarding thread to add an IfNode in their graph.
-    // All threads will create an IfNode, but only the ones specified in thread_mask will
+    // Send a message and ask every forwarding thread to add an IfNode in their graph.
+    // All threads will create an IfNode, but only the ones specified in 'thread' will
     // do device I/O
     let init = GnodeInit {
         name: intf.name(),
@@ -212,7 +211,18 @@ pub fn create_interface_node(
         init,
     };
     let msg = R2Msg::GnodeAdd(msg);
-    r2.broadcast(msg);
+    let mut io = None;
+    for thr in 0..r2.threads.len() {
+        let t = &r2.threads[thr];
+        if thread != t.thread {
+            let m = msg.clone(&mut r2.counters, t.logger.clone());
+            r2.unicast(m, thr);
+        } else {
+            io = Some(thr);
+        }
+    }
+    // And finally send the message to the thread that wants to do device I/O
+    r2.unicast(msg, io.unwrap());
 
     r2.ifd.add(ifname, ifindex as usize, interface.clone());
     create_eth_nodes(r2, interface);

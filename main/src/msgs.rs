@@ -15,7 +15,7 @@ pub fn ctrl2fwd_messages(
                 g.finalize();
             }
             R2Msg::EpollAdd(epoll_add) => {
-                if (epoll_add.thread_mask & (1 << thread)) != 0 {
+                if epoll_add.thread == thread {
                     if let Some(fd) = epoll_add.fd {
                         epoll.add(fd, EPOLLIN);
                     }
