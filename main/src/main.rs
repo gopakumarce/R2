@@ -38,7 +38,7 @@ const LOGLINES: usize = 1000;
 const MAX_FDS: i32 = 4000;
 const DEF_PKTS: usize = 512;
 const DEF_PARTS: usize = 2 * DEF_PKTS;
-const DEF_PARTICLE_SZ: usize = 2048;
+const DEF_PARTICLE_SZ: usize = 3072;
 const R2_CFG_FILE: &str = "/etc/r2.cfg";
 pub const MAX_HEADROOM: usize = 100;
 
