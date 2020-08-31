@@ -26,7 +26,9 @@ use msgs::{ctrl2fwd_messages, fwd2ctrl_messages};
 mod logs;
 use logs::LogApis;
 mod pkts;
+use clap::{App, Arg};
 use dpdk::dpdk_launch;
+use ini::Ini;
 use perf::Perf;
 
 const THREADS: usize = 2;
@@ -49,7 +51,7 @@ pub struct R2 {
     threads: Vec<R2PerThread>,
     ifd: IfdCtx,
     ipv4: IPv4Ctx,
-    dpdk: bool,
+    dpdk: DpdkCfg,
 }
 
 impl R2 {
@@ -83,6 +85,8 @@ impl R2 {
             });
         }
 
+        let dpdk = DpdkCfg { on: false, mem: 0 };
+
         R2 {
             counters,
             fwd2ctrl,
@@ -90,7 +94,7 @@ impl R2 {
             threads,
             ifd: IfdCtx::new(),
             ipv4: IPv4Ctx::new(),
-            dpdk: false,
+            dpdk,
         }
     }
 
@@ -107,6 +111,11 @@ impl R2 {
             t.efd.write(1);
         }
     }
+}
+
+struct DpdkCfg {
+    on: bool,   // Is dpdk enabled ?
+    mem: usize, // hugepages memory in Mb
 }
 
 // R2 context information that is unique per forwarding thread
@@ -257,7 +266,7 @@ fn create_thread(r2: &mut R2, g: Graph<R2Msg>, thread: usize) {
         g,
     });
 
-    if r2.dpdk {
+    if r2.dpdk.on {
         launch_dpdk_thread(t);
     } else {
         launch_pthread(t);
@@ -297,6 +306,44 @@ fn launch_api_svr(mut svr: ApiSvr) {
         .unwrap();
 }
 
+fn parse_cfg(r2: &mut R2) {
+    let matches = App::new("R2")
+        .version("1.0")
+        .author("Gopa Kumar")
+        .about("Router in Rust")
+        .arg(
+            Arg::with_name("config")
+                .short("c")
+                .long("config")
+                .value_name("FILE")
+                .help("R2 config file")
+                .takes_value(true),
+        )
+        .get_matches();
+
+    if let Some(cfg) = matches.value_of("config") {
+        let ini = Ini::load_from_file(cfg).unwrap();
+        for (sec, prop) in ini.iter() {
+            match sec.unwrap() {
+                "dpdk" => {
+                    for (k, v) in prop.iter() {
+                        match k {
+                            "on" => {
+                                r2.dpdk.on = v.parse::<bool>().unwrap();
+                            }
+                            "mem" => {
+                                r2.dpdk.mem = v.parse::<usize>().unwrap();
+                            }
+                            unknown => panic!("Unknown dpdk config {}", unknown),
+                        }
+                    }
+                }
+                unknown => panic!("Unknown config {}", unknown),
+            }
+        }
+    }
+}
+
 fn main() {
     let (sender, receiver) = channel();
     let r2_rc = Arc::new(Mutex::new(R2::new(
@@ -307,7 +354,11 @@ fn main() {
         sender,
         THREADS,
     )));
+
     let mut r2 = r2_rc.lock().unwrap();
+
+    parse_cfg(&mut r2);
+
     let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
     let pool = Box::new(PktsHeap::new(
         "PKTS_HEAP",
