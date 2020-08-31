@@ -175,6 +175,10 @@ impl PacketPool for PktsDpdk {
             None
         }
     }
+
+    fn opaque(&self) -> u64 {
+        self.dpdk_pool as u64
+    }
 }
 
 pub enum DpdkHw {
@@ -183,39 +187,57 @@ pub enum DpdkHw {
 }
 
 pub struct Params<'a> {
-    name: &'a str,
-    hw: DpdkHw,
-    pool: *mut rte_mempool,
+    pub name: &'a str,
+    pub hw: DpdkHw,
 }
 
 pub struct Dpdk {
     name: String,
     port: u16,
     glob_idx: u16,
+    init_done: bool,
+    init_fail: Counter,
+    no_pkts: Counter,
+    send_err: Counter,
+    recv_err: Counter,
 }
 
+#[derive(Default)]
 pub struct DpdkGlobal {
     index: u16,
 }
 
 impl DpdkGlobal {
-    fn new(mem_sz: usize, ncores: usize) -> Self {
+    pub fn new(mem_sz: usize, ncores: usize) -> Self {
         if let Err(err) = dpdk_init(mem_sz, ncores) {
             panic!("DPDK Init failed {}", err);
         }
         DpdkGlobal { index: 0 }
     }
 
-    fn add(&mut self, params: Params) -> Result<Dpdk, PortInitErr> {
+    pub fn add(&mut self, counters: &mut Counters, params: Params) -> Result<Dpdk, PortInitErr> {
         let index = self.index;
+        let name = format!("InitErr_{}", params.name);
+        let init_fail = Counter::new(counters, "DpdkIfnode", CounterType::Pkts, &name);
+        let name = format!("NoPkts_{}", params.name);
+        let no_pkts = Counter::new(counters, "DpdkIfnode", CounterType::Pkts, &name);
+        let name = format!("SendErr_{}", params.name);
+        let send_err = Counter::new(counters, "DpdkIfnode", CounterType::Pkts, &name);
+        let name = format!("RecvErr_{}", params.name);
+        let recv_err = Counter::new(counters, "DpdkIfnode", CounterType::Pkts, &name);
         match params.hw {
-            DpdkHw::AfPacket => match dpdk_af_packet_init(params.name, index, params.pool) {
+            DpdkHw::AfPacket => match dpdk_af_packet_init(params.name, index) {
                 Ok(port) => {
                     self.index += 1;
                     Ok(Dpdk {
                         name: params.name.to_string(),
                         port,
                         glob_idx: index,
+                        init_done: false,
+                        init_fail,
+                        no_pkts,
+                        send_err,
+                        recv_err,
                     })
                 }
                 Err(err) => Err(err),
@@ -225,12 +247,35 @@ impl DpdkGlobal {
     }
 }
 
+impl Dpdk {
+    fn init(&mut self, pool: &mut dyn PacketPool) -> Result<(), PortInitErr> {
+        unsafe {
+            let mbuf_pool = pool.opaque() as *mut rte_mempool;
+            if let Err(err) = dpdk_queue_cfg(self.port, N_RX_DESC, N_TX_DESC, mbuf_pool) {
+                return Err(err);
+            }
+            if rte_eth_dev_start(self.port) < 0 {
+                return Err(PortInitErr::START_FAIL);
+            }
+            Ok(())
+        }
+    }
+}
+
 impl Driver for Dpdk {
     fn fd(&self) -> Option<i32> {
         None
     }
 
-    fn recvmsg(&self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt> {
+    fn recvmsg(&mut self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt> {
+        if !self.init_done {
+            if let Err(_) = self.init(pool) {
+                self.init_fail.add(1);
+                return None;
+            }
+            self.init_done = true;
+        }
+
         if headroom > HEADROOM {
             return None;
         }
@@ -255,16 +300,26 @@ impl Driver for Dpdk {
                     if pkt.move_tail(len) == len {
                         Some(pkt)
                     } else {
+                        self.recv_err.add(1);
                         None
                     }
                 } else {
+                    self.no_pkts.add(1);
                     None
                 }
             }
         }
     }
 
-    fn sendmsg(&self, mut pkt: BoxPkt) -> usize {
+    fn sendmsg(&mut self, pool: &mut dyn PacketPool, mut pkt: BoxPkt) -> usize {
+        if !self.init_done {
+            if let Err(_) = self.init(pool) {
+                self.init_fail.add(1);
+                return 0;
+            }
+            self.init_done = true;
+        }
+
         unsafe {
             let m = pkt.head_mut().as_mut_ptr();
             let mut partptr: *mut *mut u8 = m as *mut *mut u8;
@@ -285,6 +340,7 @@ impl Driver for Dpdk {
                 (*mbuf).__bindgen_anon_2.refcnt_atomic.cnt + 1;
             if dpdk_tx_one(self.port, 0, &mut mbuf) != 1 {
                 dpdk_mbuf_free(mbuf);
+                self.send_err.add(1);
                 0
             } else {
                 len
@@ -419,26 +475,14 @@ fn dpdk_port_probe(intf: &str, af_idx: u16) -> Result<u16, PortInitErr> {
     Ok(port)
 }
 
-fn dpdk_af_packet_init(
-    intf: &str,
-    af_idx: u16,
-    pool: *mut rte_mempool,
-) -> Result<u16, PortInitErr> {
-    let mut port: u16 = RTE_MAX_ETHPORTS as u16;
-    unsafe {
-        match dpdk_port_probe(intf, af_idx) {
-            Err(err) => return Err(err),
-            Ok(p) => port = p,
-        };
-        if let Err(err) = dpdk_port_cfg(port) {
-            return Err(err);
-        }
-        if let Err(err) = dpdk_queue_cfg(port, N_RX_DESC, N_TX_DESC, pool) {
-            return Err(err);
-        }
-        if rte_eth_dev_start(port) < 0 {
-            return Err(PortInitErr::START_FAIL);
-        }
+fn dpdk_af_packet_init(intf: &str, af_idx: u16) -> Result<u16, PortInitErr> {
+    let port: u16;
+    match dpdk_port_probe(intf, af_idx) {
+        Err(err) => return Err(err),
+        Ok(p) => port = p,
+    };
+    if let Err(err) = dpdk_port_cfg(port) {
+        return Err(err);
     }
     Ok(port)
 }

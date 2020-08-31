@@ -38,7 +38,7 @@ pub struct IfNode {
     thread_mask: u64,
     intf: Arc<Interface>,
     sched: Hfsc,
-    driver: Arc<dyn Driver + Send>,
+    driver: Option<Box<dyn Driver + Send>>,
     sched_fail: Counter,
     threadq_fail: Counter,
     thread_q: Arc<ArrayQueue<BoxPkt>>,
@@ -54,7 +54,7 @@ impl IfNode {
         thread_mask: u64,
         efd: Arc<Efd>,
         intf: Arc<Interface>,
-        driver: Arc<dyn Driver + Send>,
+        driver: Box<dyn Driver + Send>,
     ) -> Result<Self, i32> {
         let name = names::rx_tx(intf.ifindex);
 
@@ -67,7 +67,7 @@ impl IfNode {
             thread_mask,
             intf,
             sched,
-            driver,
+            driver: Some(driver),
             sched_fail,
             threadq_fail,
             thread_q: Arc::new(ArrayQueue::new(VEC_SIZE)),
@@ -89,7 +89,11 @@ impl IfNode {
     }
 
     pub fn fd(&self) -> Option<i32> {
-        self.driver.fd()
+        if let Some(ref driver) = self.driver {
+            driver.fd()
+        } else {
+            None
+        }
     }
 }
 
@@ -105,7 +109,7 @@ impl Gclient<R2Msg> for IfNode {
             thread_mask: self.thread_mask,
             intf: self.intf.clone(),
             sched,
-            driver: self.driver.clone(),
+            driver: None,
             sched_fail,
             threadq_fail,
             thread_q: self.thread_q.clone(),
@@ -123,7 +127,7 @@ impl Gclient<R2Msg> for IfNode {
                 // TODO: We have the scheduler, but we havent figured out the packet queueing
                 // model. Till then we cant really put the scheduler to use
                 if !self.sched.has_classes() {
-                    self.driver.sendmsg(p);
+                    self.driver.as_mut().unwrap().sendmsg(vectors.pool, p);
                 }
             } else if self.thread_q.push(p).is_err() {
                 self.threadq_fail.incr();
@@ -134,7 +138,7 @@ impl Gclient<R2Msg> for IfNode {
         if owner_thread {
             while let Ok(p) = self.thread_q.pop() {
                 if !self.sched.has_classes() {
-                    self.driver.sendmsg(p);
+                    self.driver.as_mut().unwrap().sendmsg(vectors.pool, p);
                 }
             }
         }
@@ -146,7 +150,11 @@ impl Gclient<R2Msg> for IfNode {
         // Do packet Rx, only on the thread this driver is pinned to
         if owner_thread {
             for _ in 0..VEC_SIZE {
-                let pkt = self.driver.recvmsg(vectors.pool, self.intf.headroom);
+                let pkt = self
+                    .driver
+                    .as_mut()
+                    .unwrap()
+                    .recvmsg(vectors.pool, self.intf.headroom);
                 if pkt.is_none() {
                     break;
                 }

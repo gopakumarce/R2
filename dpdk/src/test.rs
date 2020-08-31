@@ -21,15 +21,9 @@ fn packet_free(q: Arc<ArrayQueue<BoxPkt>>, pool: &mut dyn PacketPool) {
     }
 }
 
-fn packet_pool(test: &str, q: Arc<ArrayQueue<BoxPkt>>) -> Box<PktsDpdk> {
-    let mut counters = Counters::new(test).unwrap();
+fn packet_pool(test: &str, counters: &mut Counters, q: Arc<ArrayQueue<BoxPkt>>) -> Box<PktsDpdk> {
     Box::new(PktsDpdk::new(
-        test,
-        q,
-        &mut counters,
-        NUM_PKTS,
-        NUM_PART,
-        PART_SZ,
+        test, q, counters, NUM_PKTS, NUM_PART, PART_SZ,
     ))
 }
 
@@ -124,7 +118,10 @@ fn dpdk_thread(mut params: Box<DpdkThread>) {
         }
         let mut pkt = pkt.unwrap();
         assert!(pkt.append(&mut *params.pool_tx, &data[0..]));
-        assert_eq!(params.dpdk_tx.sendmsg(pkt), MAX_PACKET);
+        assert_eq!(
+            params.dpdk_tx.sendmsg(&mut *params.pool_tx, pkt),
+            MAX_PACKET
+        );
 
         let pkt = params.dpdk_rx.recvmsg(&mut *params.pool_rx, 0);
         if pkt.is_none() {
@@ -150,28 +147,27 @@ fn read_write() {
     delete_veth();
     create_veth();
 
-    let mut glob = DpdkGlobal::new(128, 1);
+    let mut glob = DpdkGlobal::new(2, 1);
 
     let q_tx = Arc::new(ArrayQueue::new(NUM_PKTS));
-    let pool_tx = packet_pool("dpdk_read_write_tx", q_tx.clone());
+    let mut counters = Counters::new("dpdk_test").unwrap();
+    let pool_tx = packet_pool("dpdk_read_write_tx", &mut counters, q_tx.clone());
     let params = Params {
         name: "r2_eth1",
         hw: DpdkHw::AfPacket,
-        pool: pool_tx.dpdk_pool,
     };
-    let dpdk_tx = match glob.add(params) {
+    let dpdk_tx = match glob.add(&mut counters, params) {
         Ok(dpdk) => dpdk,
         Err(err) => panic!("Error {:?} creating dpdk port", err),
     };
 
     let q_rx = Arc::new(ArrayQueue::new(NUM_PKTS));
-    let pool_rx = packet_pool("dpdk_read_write_rx", q_rx.clone());
+    let pool_rx = packet_pool("dpdk_read_write_rx", &mut counters, q_rx.clone());
     let params = Params {
         name: "r2_eth2",
         hw: DpdkHw::AfPacket,
-        pool: pool_rx.dpdk_pool,
     };
-    let dpdk_rx = match glob.add(params) {
+    let dpdk_rx = match glob.add(&mut counters, params) {
         Ok(dpdk) => dpdk,
         Err(err) => panic!("Error {:?} creating dpdk port", err),
     };

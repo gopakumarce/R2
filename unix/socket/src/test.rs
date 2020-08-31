@@ -103,7 +103,7 @@ fn read_write() {
     let rx_q = Arc::new(ArrayQueue::new(NUM_PKTS));
     let mut pool = packet_pool("sock_read_write_rx", MAX_PACKET, rx_q.clone());
     let handler = thread::Builder::new().name(tname).spawn(move || {
-        let raw = match RawSock::new("r2_eth2", false) {
+        let mut raw = match RawSock::new("r2_eth2", false) {
             Ok(raw) => raw,
             Err(errno) => panic!("Errno {} opening socket", errno),
         };
@@ -124,7 +124,7 @@ fn read_write() {
         done.fetch_add(1, Ordering::Relaxed);
     });
 
-    let raw = match RawSock::new("r2_eth1", false) {
+    let mut raw = match RawSock::new("r2_eth1", false) {
         Ok(raw) => raw,
         Err(errno) => panic!("Errno {} opening socket", errno),
     };
@@ -136,7 +136,7 @@ fn read_write() {
     while wait.load(Ordering::Relaxed) == 0 {
         let mut pkt = pool.pkt(0).unwrap();
         assert!(pkt.append(&mut *pool, &data[0..]));
-        assert_eq!(raw.sendmsg(pkt), MAX_PACKET);
+        assert_eq!(raw.sendmsg(&mut *pool, pkt), MAX_PACKET);
         packet_free(tx_q.clone(), &mut *pool);
     }
 

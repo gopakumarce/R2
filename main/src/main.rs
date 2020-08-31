@@ -28,6 +28,7 @@ use logs::LogApis;
 mod pkts;
 use clap::{App, Arg};
 use dpdk::dpdk_launch;
+use dpdk::{DpdkGlobal, PktsDpdk};
 use ini::Ini;
 use perf::Perf;
 
@@ -38,6 +39,7 @@ const MAX_FDS: i32 = 4000;
 const DEF_PKTS: usize = 512;
 const DEF_PARTS: usize = 2 * DEF_PKTS;
 const DEF_PARTICLE_SZ: usize = 2048;
+const R2_CFG_FILE: &str = "/etc/r2.cfg";
 pub const MAX_HEADROOM: usize = 100;
 
 // This holds various pieces of context for all of R2, like the interface context,
@@ -85,7 +87,12 @@ impl R2 {
             });
         }
 
-        let dpdk = DpdkCfg { on: false, mem: 0 };
+        let dpdk = DpdkCfg {
+            on: false,
+            mem: 0,
+            ncores: 0,
+            glob: Default::default(),
+        };
 
         R2 {
             counters,
@@ -114,8 +121,10 @@ impl R2 {
 }
 
 struct DpdkCfg {
-    on: bool,   // Is dpdk enabled ?
-    mem: usize, // hugepages memory in Mb
+    on: bool,      // Is dpdk enabled ?
+    mem: usize,    // hugepages memory in Mb
+    ncores: usize, // number of cores used for dpdk
+    glob: DpdkGlobal,
 }
 
 // R2 context information that is unique per forwarding thread
@@ -321,8 +330,11 @@ fn parse_cfg(r2: &mut R2) {
         )
         .get_matches();
 
-    if let Some(cfg) = matches.value_of("config") {
-        let ini = Ini::load_from_file(cfg).unwrap();
+    let cfg = match matches.value_of("config") {
+        Some(cfg) => cfg,
+        None => R2_CFG_FILE,
+    };
+    if let Ok(ini) = Ini::load_from_file(cfg) {
         for (sec, prop) in ini.iter() {
             match sec.unwrap() {
                 "dpdk" => {
@@ -333,6 +345,9 @@ fn parse_cfg(r2: &mut R2) {
                             }
                             "mem" => {
                                 r2.dpdk.mem = v.parse::<usize>().unwrap();
+                            }
+                            "ncores" => {
+                                r2.dpdk.ncores = v.parse::<usize>().unwrap();
                             }
                             unknown => panic!("Unknown dpdk config {}", unknown),
                         }
@@ -360,15 +375,29 @@ fn main() {
     parse_cfg(&mut r2);
 
     let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
-    let pool = Box::new(PktsHeap::new(
-        "PKTS_HEAP",
-        queue.clone(),
-        &mut r2.counters,
-        DEF_PKTS,
-        DEF_PARTS,
-        DEF_PARTICLE_SZ,
-    ));
-    let mut graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
+    let mut graph;
+    if r2.dpdk.on {
+        r2.dpdk.glob = DpdkGlobal::new(r2.dpdk.mem, r2.dpdk.ncores);
+        let pool = Box::new(PktsDpdk::new(
+            "GraphPool",
+            queue.clone(),
+            &mut r2.counters,
+            DEF_PKTS,
+            DEF_PARTS,
+            DEF_PARTICLE_SZ,
+        ));
+        graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
+    } else {
+        let pool = Box::new(PktsHeap::new(
+            "GraphPool",
+            queue.clone(),
+            &mut r2.counters,
+            DEF_PKTS,
+            DEF_PARTS,
+            DEF_PARTICLE_SZ,
+        ));
+        graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
+    }
     create_nodes(&mut r2, &mut graph);
     launch_threads(&mut r2, graph);
 

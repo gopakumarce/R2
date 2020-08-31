@@ -17,9 +17,9 @@ const GRAPH_INIT_SZ: usize = 1024;
 pub const VEC_SIZE: usize = 256;
 
 pub trait Driver: Sync {
-    fn sendmsg(&self, pkt: BoxPkt) -> usize;
-    fn recvmsg(&self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt>;
     fn fd(&self) -> Option<i32>;
+    fn sendmsg(&mut self, pool: &mut dyn PacketPool, pkt: BoxPkt) -> usize;
+    fn recvmsg(&mut self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt>;
 }
 
 /// Every graph node feature/client needs to implement these methods/APIs

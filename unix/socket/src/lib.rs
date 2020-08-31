@@ -13,7 +13,7 @@ impl Driver for RawSock {
         Some(self.fd)
     }
 
-    fn recvmsg(&self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt> {
+    fn recvmsg(&mut self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt> {
         let pkt = (*pool).pkt(headroom);
         if pkt.is_none() {
             return None;
@@ -42,7 +42,7 @@ impl Driver for RawSock {
         }
     }
 
-    fn sendmsg(&self, pkt: BoxPkt) -> usize {
+    fn sendmsg(&mut self, _pool: &mut dyn PacketPool, pkt: BoxPkt) -> usize {
         unsafe {
             let slices = pkt.slices();
             let iov: libc::iovec = mem::MaybeUninit::zeroed().assume_init();

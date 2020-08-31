@@ -203,6 +203,12 @@ pub trait PacketPool: Send {
     fn pkt_with_particles(&mut self, _part: BoxPart) -> Option<BoxPkt> {
         None
     }
+
+    // This is an optional method if the driver wants to know some driver/hardware specific
+    // properties of the pool
+    fn opaque(&self) -> u64 {
+        0
+    }
 }
 
 /// Here we provide a default packet pool implementation, where the Packet, Particle and

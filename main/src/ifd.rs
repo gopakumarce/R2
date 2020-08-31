@@ -2,6 +2,7 @@ use super::*;
 use crate::ipv4::add_route;
 use crate::ipv4::del_route;
 use apis_interface::{CurvesApi, InterfaceErr, InterfaceSyncHandler};
+use dpdk::DpdkHw;
 use fwd::intf::Interface;
 use fwd::intf::ModifyInterfaceMsg;
 use fwd::ZERO_IP;
@@ -150,21 +151,42 @@ pub fn create_interface_node(
     r2.ifd.last_thread = (thread + 1) % r2.nthreads;
     let thread_mask = 1 << thread;
     let efd = r2.threads[thread].efd.clone();
-    let sock = match RawSock::new(ifname, true) {
-        Ok(sock) => sock,
-        Err(errno) => return Err(-errno),
-    };
-    let intf = match IfNode::new(
-        &mut r2.counters,
-        thread_mask,
-        efd,
-        interface.clone(),
-        Arc::new(sock),
-    ) {
-        Ok(intf) => intf,
-        Err(errno) => return Err(-errno),
-    };
-
+    let intf;
+    if r2.dpdk.on {
+        let params = dpdk::Params {
+            name: ifname,
+            hw: DpdkHw::AfPacket,
+        };
+        let dpdk = match r2.dpdk.glob.add(&mut r2.counters, params) {
+            Ok(dpdk) => dpdk,
+            Err(err) => panic!("Error {:?} creating dpdk port", err),
+        };
+        intf = match IfNode::new(
+            &mut r2.counters,
+            thread_mask,
+            efd,
+            interface.clone(),
+            Box::new(dpdk),
+        ) {
+            Ok(intf) => intf,
+            Err(errno) => return Err(-errno),
+        };
+    } else {
+        let sock = match RawSock::new(ifname, true) {
+            Ok(sock) => sock,
+            Err(errno) => return Err(-errno),
+        };
+        intf = match IfNode::new(
+            &mut r2.counters,
+            thread_mask,
+            efd,
+            interface.clone(),
+            Box::new(sock),
+        ) {
+            Ok(intf) => intf,
+            Err(errno) => return Err(-errno),
+        };
+    }
     // If the interface has file descriptors that indicate I/O readiness, we add it to the
     // list of descriptors we are polling on. Every forwarding thread is polling on its own
     // set of descriptors, every thread will receive this message, but only the ones marked
