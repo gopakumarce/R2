@@ -118,7 +118,7 @@ impl Gclient<R2Msg> for IfNode {
     }
 
     fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
-        let owner_thread = self.affinity == Some(thread);
+        let owner_thread = self.affinity.is_none() || (self.affinity == Some(thread));
         // Do packet Tx if we are the owner thread (thread the driver/device is pinnned to).
         // If so send the packet out on the driver, otherwise enqueue the packet to the MPSC
         // queue to the owner thread
@@ -173,7 +173,7 @@ impl Gclient<R2Msg> for IfNode {
                 self.intf = mod_intf.intf;
             }
             R2Msg::ClassAdd(class) => {
-                if (self.affinity == Some(thread))
+                if (self.affinity.is_none() || (self.affinity == Some(thread)))
                     && self
                         .sched
                         .create_class(

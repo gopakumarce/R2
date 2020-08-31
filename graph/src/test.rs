@@ -111,7 +111,7 @@ impl Gclient<TestMsg> for RxNode {
     }
 
     fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
-        if self.affinity != Some(thread) {
+        if self.affinity.is_some() && (self.affinity != Some(thread)) {
             return;
         }
         let pkt = new_pkt(vectors.pool, self.count);
