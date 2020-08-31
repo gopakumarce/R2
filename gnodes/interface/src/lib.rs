@@ -35,7 +35,7 @@ fn next_name(ifindex: usize, next: Next) -> String {
 // interface. All other threads handoff packets to the 'owner' vis MPSC 'thread_q'
 pub struct IfNode {
     name: String,
-    affinity: usize,
+    affinity: Option<usize>,
     intf: Arc<Interface>,
     sched: Hfsc,
     driver: Option<Box<dyn Driver + Send>>,
@@ -51,7 +51,7 @@ impl IfNode {
     // intf: The common driver-agnostic parameters of an interface like ip address/mtu etc..
     pub fn new(
         counters: &mut Counters,
-        affinity: usize,
+        affinity: Option<usize>,
         efd: Arc<Efd>,
         intf: Arc<Interface>,
         driver: Box<dyn Driver + Send>,
@@ -118,7 +118,7 @@ impl Gclient<R2Msg> for IfNode {
     }
 
     fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
-        let owner_thread = self.affinity == thread;
+        let owner_thread = self.affinity == Some(thread);
         // Do packet Tx if we are the owner thread (thread the driver/device is pinnned to).
         // If so send the packet out on the driver, otherwise enqueue the packet to the MPSC
         // queue to the owner thread
@@ -173,7 +173,7 @@ impl Gclient<R2Msg> for IfNode {
                 self.intf = mod_intf.intf;
             }
             R2Msg::ClassAdd(class) => {
-                if (self.affinity == thread)
+                if (self.affinity == Some(thread))
                     && self
                         .sched
                         .create_class(

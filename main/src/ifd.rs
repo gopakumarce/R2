@@ -162,7 +162,7 @@ pub fn create_interface_node(
         };
         intf = match IfNode::new(
             &mut r2.counters,
-            thread,
+            Some(thread),
             efd,
             interface.clone(),
             Box::new(dpdk),
@@ -177,7 +177,7 @@ pub fn create_interface_node(
         };
         intf = match IfNode::new(
             &mut r2.counters,
-            thread,
+            Some(thread),
             efd,
             interface.clone(),
             Box::new(sock),

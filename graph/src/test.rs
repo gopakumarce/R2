@@ -70,13 +70,13 @@ fn next_name(next: Next, thread: usize) -> String {
 }
 
 struct RxNode {
-    affinity: usize,
+    affinity: Option<usize>,
     count: usize,
     total_count: Arc<AtomicUsize>,
 }
 
 impl RxNode {
-    fn new(affinity: usize) -> RxNode {
+    fn new(affinity: Option<usize>) -> RxNode {
         RxNode {
             affinity,
             count: 0,
@@ -111,7 +111,7 @@ impl Gclient<TestMsg> for RxNode {
     }
 
     fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
-        if self.affinity != thread {
+        if self.affinity != Some(thread) {
             return;
         }
         let pkt = new_pkt(vectors.pool, self.count);
@@ -224,7 +224,7 @@ fn single_thread() {
     let log = Arc::new(Logger::new("r2_logs", 32, 1000).unwrap());
     let (pool, queue) = packet_pool("single_thread");
     let mut graph = Graph::new(0, pool, queue, &mut counters);
-    let rx = Box::new(RxNode::new(0));
+    let rx = Box::new(RxNode::new(Some(0)));
     let tx = Box::new(TxNode::new());
     let print = Box::new(PrintNode::new());
 
@@ -286,7 +286,7 @@ fn multi_thread() {
     let test_threads = 8;
     let mut rx_vec = Vec::new();
     for i in 1..=test_threads {
-        let rx = Box::new(RxNode::new(i));
+        let rx = Box::new(RxNode::new(Some(i)));
         let init = GnodeInit {
             name: rx.name(),
             next_names: rx.next_names(0),
