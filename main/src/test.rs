@@ -294,6 +294,15 @@ fn integ_test() {
     delete_veth();
     create_veth();
 
+    let cfg = R2Cfg {
+        nthreads: 1,
+        dpdk: R2CfgDpdk {
+            on: true,
+            ncores: 2,
+            mem: 1,
+        },
+    };
+
     let (sender, _receiver) = channel();
     let r2_rc = Arc::new(Mutex::new(R2::new(
         "integ_test",
@@ -301,17 +310,15 @@ fn integ_test() {
         32,
         1000,
         sender,
-        1,
+        cfg,
     )));
     let mut r2 = r2_rc.lock().unwrap();
 
-    parse_cfg(&mut r2);
-
-    if r2.dpdk.on {
-        r2.dpdk.glob = DpdkGlobal::new(r2.dpdk.mem, r2.dpdk.ncores);
+    if r2.cfg.dpdk.on {
+        r2.dpdk = DpdkGlobal::new(r2.cfg.dpdk.mem, r2.cfg.dpdk.ncores);
     }
 
-    let (pool, queue) = packet_pool("main_graph", r2.dpdk.on);
+    let (pool, queue) = packet_pool("main_graph", r2.cfg.dpdk.on);
     let mut graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
     create_nodes(&mut r2, &mut graph);
     let done = Arc::new(AtomicUsize::new(0));

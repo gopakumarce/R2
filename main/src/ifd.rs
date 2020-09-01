@@ -148,15 +148,15 @@ pub fn create_interface_node(
     let interface = Arc::new(Interface::new(ifname, ifindex, l2_addr, MAX_HEADROOM));
     // We simply spread interfaces across threads, a better strategy might be needed going foward
     let thread = r2.ifd.last_thread;
-    r2.ifd.last_thread = (thread + 1) % r2.nthreads;
+    r2.ifd.last_thread = (thread + 1) % r2.cfg.nthreads;
     let efd = r2.threads[thread].efd.clone();
     let intf;
-    if r2.dpdk.on {
+    if r2.cfg.dpdk.on {
         let params = dpdk::Params {
             name: ifname,
             hw: DpdkHw::AfPacket,
         };
-        let dpdk = match r2.dpdk.glob.add(&mut r2.counters, params) {
+        let dpdk = match r2.dpdk.add(&mut r2.counters, params) {
             Ok(dpdk) => dpdk,
             Err(err) => panic!("Error {:?} creating dpdk port", err),
         };

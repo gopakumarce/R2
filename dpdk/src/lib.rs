@@ -7,12 +7,13 @@ use dpdk_ffi::{
     rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init, rte_eth_iterator_next,
     rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup, rte_eth_tx_mq_mode_ETH_MQ_TX_NONE,
     rte_eth_tx_queue_setup, rte_mbuf, rte_mempool, rte_mempool_obj_iter, rte_pktmbuf_pool_create,
-    rte_rmt_call_master_t_SKIP_MASTER, RTE_MAX_ETHPORTS, RTE_PKTMBUF_HEADROOM, SOCKET_ID_ANY,
+    RTE_MAX_ETHPORTS, RTE_PKTMBUF_HEADROOM, SOCKET_ID_ANY,
 };
 use graph::Driver;
 use packet::{BoxPart, BoxPkt, PacketPool};
 use std::alloc::alloc;
 use std::alloc::Layout;
+use std::any::Any;
 use std::collections::VecDeque;
 use std::ffi::CString;
 use std::{mem, sync::Arc};
@@ -82,7 +83,7 @@ impl PktsDpdk {
     ) -> Self {
         assert!(num_parts >= num_pkts);
         let pkts = VecDeque::with_capacity(num_pkts);
-        let alloc_fail = Counter::new(counters, "PKS_DPDK", CounterType::Error, "PktAllocFail");
+        let alloc_fail = Counter::new(counters, name, CounterType::Error, "PktAllocFail");
         let dpdk_pool = dpdk_buffer_init(name, num_parts as u32, particle_sz as u16);
         let mut pool = PktsDpdk {
             dpdk_pool,
@@ -249,8 +250,8 @@ impl DpdkGlobal {
 
 impl Dpdk {
     fn init(&mut self, pool: &mut dyn PacketPool) -> Result<(), PortInitErr> {
+        let mbuf_pool = pool.opaque() as *mut rte_mempool;
         unsafe {
-            let mbuf_pool = pool.opaque() as *mut rte_mempool;
             if let Err(err) = dpdk_queue_cfg(self.port, N_RX_DESC, N_TX_DESC, mbuf_pool) {
                 return Err(err);
             }
@@ -371,7 +372,7 @@ pub fn dpdk_init(mem_sz: usize, _ncores: usize) -> Result<(), i32> {
         get_opt(&format!("{}", mem_sz)),
         get_opt("--no-huge"),
         get_opt("--no-pci"),
-        get_opt("--lcores=0,1"),
+        get_opt("--lcores=0,1,2"),
         get_opt("--master-lcore=0"),
         //get_opt("--log-level=*:8"),
     ];
@@ -422,15 +423,11 @@ fn dpdk_queue_cfg(
     pool: *mut rte_mempool,
 ) -> Result<(), PortInitErr> {
     unsafe {
-        let socket = rte_eth_dev_socket_id(port);
-        if socket < 0 {
-            return Err(PortInitErr::CONFIG_FAIL);
-        }
         let ret = rte_eth_rx_queue_setup(
             port,
             0,
             N_RX_DESC,
-            socket as u32,
+            rte_eth_dev_socket_id(port) as u32,
             0 as *const dpdk_ffi::rte_eth_rxconf,
             pool,
         );
@@ -441,7 +438,7 @@ fn dpdk_queue_cfg(
             port,
             0,
             N_TX_DESC,
-            socket as u32,
+            rte_eth_dev_socket_id(port) as u32,
             0 as *const dpdk_ffi::rte_eth_txconf,
         );
         if ret != 0 {

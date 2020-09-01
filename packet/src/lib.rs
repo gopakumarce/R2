@@ -196,16 +196,14 @@ pub trait PacketPool: Send {
         self.free_pkt(pkt);
     }
 
-    // This is an optional method and used only when interacting with third party libraries
-    // like dpdk that have pool management of their own, this will be called only from drivers
-    // (like dpdk), apps/gnodes are NOT supposed to call this.
-    // NOTE: If this API is unable to return Some(BoxPkt), it should free the BoxPart _part
+    // This is an optional method typically used in a device driver (eg.dpdk) that is closely
+    // tied to the pool implementation and wants to allocate a packet with a particle provided
     fn pkt_with_particles(&mut self, _part: BoxPart) -> Option<BoxPkt> {
         None
     }
 
-    // This is an optional method if the driver wants to know some driver/hardware specific
-    // properties of the pool
+    // This is an optional method typically used in a device driver (eg.dpdk) that is closely
+    // tied to the pool implementation and wants to know some driver specific pool properties
     fn opaque(&self) -> u64 {
         0
     }
