@@ -13,7 +13,6 @@ use graph::Driver;
 use packet::{BoxPart, BoxPkt, PacketPool};
 use std::alloc::alloc;
 use std::alloc::Layout;
-use std::any::Any;
 use std::collections::VecDeque;
 use std::ffi::CString;
 use std::{mem, sync::Arc};
@@ -56,10 +55,10 @@ const HEADROOM: usize = RTE_PKTMBUF_HEADROOM as usize - HEADROOM_STEAL;
 
 // For each mbuf, fill up the first two words in the headroom with the mbuf ptr and particle ptr
 unsafe extern "C" fn dpdk_init_mbuf(
-    mp: *mut rte_mempool,
-    opaque: *mut core::ffi::c_void,
+    _mp: *mut rte_mempool,
+    _opaque: *mut core::ffi::c_void,
     mbuf: *mut core::ffi::c_void,
-    index: u32,
+    _index: u32,
 ) {
     let m: *mut rte_mbuf = mbuf as *mut rte_mbuf;
     let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
@@ -193,9 +192,7 @@ pub struct Params<'a> {
 }
 
 pub struct Dpdk {
-    name: String,
     port: u16,
-    glob_idx: u16,
     init_done: bool,
     init_fail: Counter,
     no_pkts: Counter,
@@ -231,9 +228,7 @@ impl DpdkGlobal {
                 Ok(port) => {
                     self.index += 1;
                     Ok(Dpdk {
-                        name: params.name.to_string(),
                         port,
-                        glob_idx: index,
                         init_done: false,
                         init_fail,
                         no_pkts,
@@ -256,7 +251,7 @@ impl Dpdk {
                 return Err(err);
             }
             if rte_eth_dev_start(self.port) < 0 {
-                return Err(PortInitErr::START_FAIL);
+                return Err(PortInitErr::StartFail);
             }
             Ok(())
         }
@@ -352,10 +347,10 @@ impl Driver for Dpdk {
 
 #[derive(Debug)]
 pub enum PortInitErr {
-    PROBE_FAIL,
-    CONFIG_FAIL,
-    QUEUE_FAIL,
-    START_FAIL,
+    ProbeFail,
+    ConfigFail,
+    QueueFail,
+    StartFail,
     UnknownHw,
 }
 fn get_opt(opt: &str) -> *const libc::c_char {
@@ -410,7 +405,7 @@ fn dpdk_port_cfg(port: u16) -> Result<(), PortInitErr> {
         cfg.rxmode.mq_mode = rte_eth_rx_mq_mode_ETH_MQ_RX_NONE;
         cfg.txmode.mq_mode = rte_eth_tx_mq_mode_ETH_MQ_TX_NONE;
         if rte_eth_dev_configure(port, 1, 1, &mut cfg) < 0 {
-            return Err(PortInitErr::CONFIG_FAIL);
+            return Err(PortInitErr::ConfigFail);
         }
     }
     Ok(())
@@ -426,23 +421,23 @@ fn dpdk_queue_cfg(
         let ret = rte_eth_rx_queue_setup(
             port,
             0,
-            N_RX_DESC,
+            n_rxd,
             rte_eth_dev_socket_id(port) as u32,
             0 as *const dpdk_ffi::rte_eth_rxconf,
             pool,
         );
         if ret != 0 {
-            return Err(PortInitErr::QUEUE_FAIL);
+            return Err(PortInitErr::QueueFail);
         }
         let ret = rte_eth_tx_queue_setup(
             port,
             0,
-            N_TX_DESC,
+            n_txd,
             rte_eth_dev_socket_id(port) as u32,
             0 as *const dpdk_ffi::rte_eth_txconf,
         );
         if ret != 0 {
-            return Err(PortInitErr::QUEUE_FAIL);
+            return Err(PortInitErr::QueueFail);
         }
     }
     Ok(())
@@ -463,10 +458,10 @@ fn dpdk_port_probe(intf: &str, af_idx: u16) -> Result<u16, PortInitErr> {
                 id = rte_eth_iterator_next(&mut iter);
             }
         } else {
-            return Err(PortInitErr::PROBE_FAIL);
+            return Err(PortInitErr::ProbeFail);
         }
         if port == RTE_MAX_ETHPORTS as u16 {
-            return Err(PortInitErr::PROBE_FAIL);
+            return Err(PortInitErr::ProbeFail);
         }
     }
     Ok(port)

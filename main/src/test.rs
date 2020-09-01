@@ -296,6 +296,9 @@ fn integ_test() {
 
     let cfg = R2Cfg {
         nthreads: 1,
+        pkts: NUM_PKTS,
+        parts: NUM_PART,
+        part_sz: super::DEF_PARTICLE_SZ,
         dpdk: R2CfgDpdk {
             on: true,
             ncores: 2,

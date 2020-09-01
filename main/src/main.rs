@@ -127,6 +127,9 @@ struct R2CfgDpdk {
 }
 struct R2Cfg {
     nthreads: usize,
+    pkts: usize,
+    parts: usize,
+    part_sz: usize,
     dpdk: R2CfgDpdk,
 }
 
@@ -134,6 +137,9 @@ impl Default for R2Cfg {
     fn default() -> Self {
         R2Cfg {
             nthreads: THREADS,
+            pkts: DEF_PKTS,
+            parts: DEF_PARTS,
+            part_sz: DEF_PARTICLE_SZ,
             dpdk: R2CfgDpdk {
                 on: false,
                 mem: 0,
@@ -376,6 +382,22 @@ fn parse_cfg() -> R2Cfg {
     if let Ok(ini) = Ini::load_from_file(cfg) {
         for (sec, prop) in ini.iter() {
             match sec.unwrap() {
+                "general" => {
+                    for (k, v) in prop.iter() {
+                        match k {
+                            "pkts" => {
+                                ret.pkts = v.parse::<usize>().unwrap();
+                            }
+                            "particles" => {
+                                ret.parts = v.parse::<usize>().unwrap();
+                            }
+                            "particle_sz" => {
+                                ret.part_sz = v.parse::<usize>().unwrap();
+                            }
+                            unknown => panic!("Uknown general config {}", unknown),
+                        }
+                    }
+                }
                 "dpdk" => {
                     for (k, v) in prop.iter() {
                         match k {
