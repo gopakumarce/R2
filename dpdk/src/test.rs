@@ -3,7 +3,6 @@ use super::*;
 use counters::Counters;
 use crossbeam_queue::ArrayQueue;
 use packet::PacketPool;
-use socket::RawSock;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
