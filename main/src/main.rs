@@ -227,6 +227,7 @@ fn launch_pthread(mut t: Box<ThreadParams>) {
 
 fn launch_dpdk_thread(t: Box<ThreadParams>) {
     dpdk_launch(
+        t.thread + 1,
         Some(dpdk_eal_thread),
         Box::into_raw(t) as *mut core::ffi::c_void,
     );

@@ -147,7 +147,8 @@ fn read_write() {
     delete_veth();
     create_veth();
 
-    let mut glob = DpdkGlobal::new(2, 1);
+    // Two cores, core0 master lcore, and core1 for packet forwarding
+    let mut glob = DpdkGlobal::new(2, 2);
 
     let q_tx = Arc::new(ArrayQueue::new(NUM_PKTS));
     let mut counters = Counters::new("dpdk_test").unwrap();
@@ -186,6 +187,7 @@ fn read_write() {
     });
 
     dpdk_launch(
+        1,
         Some(dpdk_eal_thread),
         Box::into_raw(params) as *mut core::ffi::c_void,
     );

@@ -3,7 +3,7 @@ use counters::Counters;
 use crossbeam_queue::ArrayQueue;
 use dpdk_ffi::{
     dpdk_mbuf_alloc, dpdk_mbuf_free, dpdk_rx_one, dpdk_tx_one, lcore_function_t, rte_dev_iterator,
-    rte_dev_probe, rte_eal_init, rte_eal_mp_remote_launch, rte_eth_conf, rte_eth_dev_configure,
+    rte_dev_probe, rte_eal_init, rte_eal_remote_launch, rte_eth_conf, rte_eth_dev_configure,
     rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init, rte_eth_iterator_next,
     rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup, rte_eth_tx_mq_mode_ETH_MQ_TX_NONE,
     rte_eth_tx_queue_setup, rte_mbuf, rte_mempool, rte_mempool_obj_iter, rte_pktmbuf_pool_create,
@@ -390,9 +390,9 @@ pub fn dpdk_init(mem_sz: usize, _ncores: usize) -> Result<(), i32> {
     }
 }
 
-pub fn dpdk_launch(dpdk_thread: lcore_function_t, arg: *mut core::ffi::c_void) {
+pub fn dpdk_launch(core: usize, dpdk_thread: lcore_function_t, arg: *mut core::ffi::c_void) {
     unsafe {
-        rte_eal_mp_remote_launch(dpdk_thread, arg, rte_rmt_call_master_t_SKIP_MASTER);
+        rte_eal_remote_launch(dpdk_thread, arg, core as u32);
     }
 }
 
