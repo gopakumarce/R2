@@ -264,6 +264,10 @@ impl Driver for Dpdk {
     }
 
     fn recvmsg(&mut self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt> {
+        // The port has to be initialized with pools AFTER the node is added to the specific graph,
+        // because the control thread does not have access to the pools once the graph thread is created.
+        // We could have added some kind of node-init() API per node rather than doing it like this here,
+        // thats something to be considered for future if more nodes need a run time init
         if !self.init_done {
             if let Err(_) = self.init(pool) {
                 self.init_fail.add(1);
@@ -308,6 +312,10 @@ impl Driver for Dpdk {
     }
 
     fn sendmsg(&mut self, pool: &mut dyn PacketPool, mut pkt: BoxPkt) -> usize {
+        // The port has to be initialized with pools AFTER the node is added to the specific graph,
+        // because the control thread does not have access to the pools once the graph thread is created.
+        // We could have added some kind of node-init() API per node rather than doing it like this here,
+        // thats something to be considered for future if more nodes need a run time init
         if !self.init_done {
             if let Err(_) = self.init(pool) {
                 self.init_fail.add(1);
