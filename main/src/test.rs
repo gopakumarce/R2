@@ -2,6 +2,7 @@ use super::ipv4::add_route;
 use super::*;
 use fwd::EthMacAddMsg;
 use fwd::EthMacRaw;
+use graph::Driver;
 use packet::{BoxPkt, PacketPool, PktsHeap};
 use socket::RawSock;
 use std::net::Ipv4Addr;
@@ -27,19 +28,30 @@ const MAC_OUTPUT: &str = "aa:bb:ca:fe:ba:be";
 const NUM_PKTS: usize = 10;
 const NUM_PART: usize = 20;
 
-fn packet_pool(test: &str) -> (Box<dyn PacketPool>, Arc<ArrayQueue<BoxPkt>>) {
+fn packet_pool(test: &str, dpdk: bool) -> (Box<dyn PacketPool>, Arc<ArrayQueue<BoxPkt>>) {
     let q = Arc::new(ArrayQueue::<BoxPkt>::new(NUM_PKTS));
     let mut counters = Counters::new(test).unwrap();
-    (
-        Box::new(PktsHeap::new(
+    if dpdk {
+        let pool = Box::new(PktsDpdk::new(
+            test,
             q.clone(),
             &mut counters,
             NUM_PKTS,
             NUM_PART,
             DEF_PARTICLE_SZ,
-        )),
-        q,
-    )
+        ));
+        (pool, q)
+    } else {
+        let pool = Box::new(PktsHeap::new(
+            test,
+            q.clone(),
+            &mut counters,
+            NUM_PKTS,
+            NUM_PART,
+            DEF_PARTICLE_SZ,
+        ));
+        (pool, q)
+    }
 }
 
 fn delete_veth() {
@@ -184,17 +196,17 @@ fn packet_send(done: Arc<AtomicUsize>) -> std::thread::JoinHandle<()> {
     thread::Builder::new()
         .name("tx".to_string())
         .spawn(move || {
-            let raw = match RawSock::new(EXTERNAL_OUTPUT, false) {
+            let mut raw = match RawSock::new(EXTERNAL_OUTPUT, false) {
                 Ok(sock) => sock,
                 Err(errno) => panic!("Cant open packet socket, errno {}", errno),
             };
-            let (mut pool, queue) = packet_pool("main_pkt_send");
+            let (mut pool, queue) = packet_pool("main_pkt_send", false);
             while done.load(Ordering::Relaxed) == 0 {
                 let mut pkt = pool.pkt(0).unwrap();
                 assert!(pkt.append(&mut *pool, &ETH_HDR_IPV4));
                 let data: Vec<u8> = vec![0; DATA_LEN - 14];
                 assert!(pkt.append(&mut *pool, &data));
-                assert_eq!(raw.sendmsg(&pkt), DATA_LEN);
+                assert_eq!(raw.sendmsg(&mut *pool, pkt), DATA_LEN);
                 while let Ok(p) = queue.pop() {
                     pool.free(p);
                 }
@@ -207,15 +219,14 @@ fn packet_rcv(done: Arc<AtomicUsize>) -> std::thread::JoinHandle<()> {
     thread::Builder::new()
         .name("rx".to_string())
         .spawn(move || {
-            let raw = match RawSock::new(EXTERNAL_INPUT, false) {
+            let mut raw = match RawSock::new(EXTERNAL_INPUT, false) {
                 Ok(sock) => sock,
                 Err(errno) => panic!("Cant open packet socket, errno {}", errno),
             };
-            let (mut pool, queue) = packet_pool("main_pkt_recv");
+            let (mut pool, queue) = packet_pool("main_pkt_recv", false);
             let mut rcv = 0;
             while rcv < 10 {
-                let mut pkt = pool.pkt(0).unwrap();
-                raw.recvmsg(&mut pkt);
+                let pkt = raw.recvmsg(&mut *pool, 0).unwrap();
                 if pkt.len() != 0 {
                     assert_eq!(pkt.len(), DATA_LEN);
                     rcv += 1;
@@ -283,6 +294,18 @@ fn integ_test() {
     delete_veth();
     create_veth();
 
+    let cfg = R2Cfg {
+        nthreads: 1,
+        pkts: NUM_PKTS,
+        parts: NUM_PART,
+        part_sz: super::DEF_PARTICLE_SZ,
+        dpdk: R2CfgDpdk {
+            on: true,
+            ncores: 2,
+            mem: 1,
+        },
+    };
+
     let (sender, _receiver) = channel();
     let r2_rc = Arc::new(Mutex::new(R2::new(
         "integ_test",
@@ -290,10 +313,15 @@ fn integ_test() {
         32,
         1000,
         sender,
-        1,
+        cfg,
     )));
     let mut r2 = r2_rc.lock().unwrap();
-    let (pool, queue) = packet_pool("main_graph");
+
+    if r2.cfg.dpdk.on {
+        r2.dpdk = DpdkGlobal::new(r2.cfg.dpdk.mem, r2.cfg.dpdk.ncores);
+    }
+
+    let (pool, queue) = packet_pool("main_graph", r2.cfg.dpdk.on);
     let mut graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
     create_nodes(&mut r2, &mut graph);
     let done = Arc::new(AtomicUsize::new(0));

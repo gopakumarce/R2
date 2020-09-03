@@ -16,6 +16,12 @@ const GRAPH_INIT_SZ: usize = 1024;
 /// will get dropped
 pub const VEC_SIZE: usize = 256;
 
+pub trait Driver: Sync {
+    fn fd(&self) -> Option<i32>;
+    fn sendmsg(&mut self, pool: &mut dyn PacketPool, pkt: BoxPkt) -> usize;
+    fn recvmsg(&mut self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt>;
+}
+
 /// Every graph node feature/client needs to implement these methods/APIs
 pub trait Gclient<T>: Send {
     /// Make a clone() of the node, usually to be used in another thread. It is upto the

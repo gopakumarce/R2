@@ -9,7 +9,7 @@ R2_client1 [veth_c2_1]----[veth_r2_1] R2 [veth_r2_2]----[veth_c2_2] R2_client2
 
 The steps below have been tested on brand new Ubuntu installations 18.04 and 16.04 server AND desktop. So for other versions of ubuntu or other distributions of linux, or if you have an already running ubuntu you have mucked around with, there might have to be some modifications to the steps below. 14.04 ubuntu has a different set of steps to install docker, so I did not list that here, but if you have 14.04, just get docker and docker CLIs installed (step 2) and rest of the steps are the same. Also you might have some packages already like git, gcc etc.. in which case those apt-gets are just ignored
 
-## Four steps
+## Five steps
 
 1. Install rust as mentioned here - <https://www.rust-lang.org/tools/install>
 
@@ -19,7 +19,22 @@ The steps below have been tested on brand new Ubuntu installations 18.04 and 16.
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    ```
 
-2. Install docker as below. Docker installation steps below should go through fine. But in case you face issues, more docker information is here <https://docs.docker.com/install/linux/docker-ce/ubuntu/>.
+2. Install DPDK libraries - note we are just installing libraries, no dpdk kernel modules, not configuring any dpdk hugepages or PCI settings etc. 
+
+   ```c
+   sudo apt-get install python3 ninja-build meson
+   curl https://fast.dpdk.org/rel/dpdk-19.11.3.tar.xz -o dpdk.tar.xz
+   tar xf dpdk.tar.xz
+   cd dpdk-stable-19.11.3
+   meson build
+   cd build
+   ninja
+   sudo ninja install
+   ```
+
+   If you just want to compile the source code, these are really the only dependencies - you need the rust eco system, and you need dpdk libraries installed
+   
+3. Install docker as below. Docker installation steps below should go through fine. But in case you face issues, more docker information is here <https://docs.docker.com/install/linux/docker-ce/ubuntu/>.
 
    ```c
    sudo apt-get install -y apt-transport-https ca-certificates curl gnupg-agent software-properties-common
@@ -30,14 +45,14 @@ The steps below have been tested on brand new Ubuntu installations 18.04 and 16.
    sudo docker pull busybox
    ```
 
-3. Download the source code from here - <https://github.com/gopakumarce/R2>
+4. Download the source code from here - <https://github.com/gopakumarce/R2>
   
    ```c
    sudo apt install git
    git clone git@github.com:gopakumarce/R2.git
    ```
 
-4. In the R2 source code root directory, type the below command. The first two commands 'sudo usermod' and 'newgrp docker' adds your user to the docker group so you can create docker containers etc.. with your userid. The first time compilation can take a few seconds, the R2 build system 'cargo', downloads source code for all dependencies and compiles them them the first time. NOTE: Various things inside the script like creating new interfaces etc.., are also run with 'sudo' permissions
+5. In the R2 source code root directory, type the below command. The first two commands 'sudo usermod' and 'newgrp docker' adds your user to the docker group so you can create docker containers etc.. with your userid. The first time compilation can take a few seconds, the R2 build system 'cargo', downloads source code for all dependencies and compiles them them the first time. NOTE: Various things inside the script like creating new interfaces etc.., are also run with 'sudo' permissions
 
    ```c
    sudo usermod -aG docker $USER

@@ -16,5 +16,8 @@ The code in the unix/ directory deals with low level posix interactions with the
 
 6. packet: The packet library deals with manipulating packet data in raw byte buffers, again ends up being unsafe. The default packet pool provided by the library just deals with buffers from the heap, but at some point we anticipate R2 to come up with say Intel dpdk based packet pools as an example - at which point the place where that packet pool is implemented in R2 will also have some unsafe semantics
 
+7. dpdk: The entire dpdk library is unsafe since it deals with dpdk FFI. DPDK is a transitional component which gets us going with the help of its rich set of drivers,
+till we can afford the time to write those ourselves
+
 
 I cannot re-emphasis the need to keep the amount of unsafe code to the absolute minimum. And like I mentioned before, having seen many packet forwarding systems, I anticipate that the above list is all there ever will be of unsafe code, and if we keep the above pieces of code small and simple and bug free, we can be assured that Rust will take care of the memory sanctity of R2

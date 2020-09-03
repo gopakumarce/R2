@@ -873,4 +873,3 @@ impl RouteShowResult {
     }
   }
 }
-

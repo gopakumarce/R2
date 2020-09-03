@@ -17,3 +17,4 @@ counters = { path = "../../counters" }
 log = { path = "../../log" }
 efd = { path = "../../unix/efd" }
 socket = { path = "../../unix/socket" }
+dpdk = { path = "../../dpdk" }

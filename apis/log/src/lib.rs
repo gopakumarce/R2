@@ -390,4 +390,3 @@ impl LogShowResult {
     }
   }
 }
-

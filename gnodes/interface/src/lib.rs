@@ -3,13 +3,13 @@ use counters::Counters;
 use crossbeam_queue::ArrayQueue;
 use efd::Efd;
 use fwd::intf::Interface;
+use graph::Driver;
 use graph::{Dispatch, Gclient, VEC_SIZE};
 use log::Logger;
 use msg::R2Msg;
 use names::l2_eth_decap;
 use packet::BoxPkt;
 use sched::hfsc::Hfsc;
-use socket::RawSock;
 use std::sync::Arc;
 
 #[derive(Copy, Clone)]
@@ -35,10 +35,10 @@ fn next_name(ifindex: usize, next: Next) -> String {
 // interface. All other threads handoff packets to the 'owner' vis MPSC 'thread_q'
 pub struct IfNode {
     name: String,
-    thread_mask: u64,
+    affinity: Option<usize>,
     intf: Arc<Interface>,
     sched: Hfsc,
-    driver: Arc<RawSock>,
+    driver: Option<Box<dyn Driver + Send>>,
     sched_fail: Counter,
     threadq_fail: Counter,
     thread_q: Arc<ArrayQueue<BoxPkt>>,
@@ -46,37 +46,33 @@ pub struct IfNode {
 }
 
 impl IfNode {
-    // thread_mask: specifies which thread owns the IfNode, we expect only one bit set in the mask
+    // affinity: specifies which thread owns the IfNode
     // efd: event fd (efd) used to wakeup the owner thread when handing off packets on thread_q
     // intf: The common driver-agnostic parameters of an interface like ip address/mtu etc..
     pub fn new(
         counters: &mut Counters,
-        thread_mask: u64,
+        affinity: Option<usize>,
         efd: Arc<Efd>,
         intf: Arc<Interface>,
+        driver: Box<dyn Driver + Send>,
     ) -> Result<Self, i32> {
         let name = names::rx_tx(intf.ifindex);
-        match RawSock::new(&intf.ifname, true) {
-            Ok(sock) => {
-                // By default the scheduler is HFSC today, eventually there will be other options
-                let sched = sched::hfsc::Hfsc::new(common::MB!(10 * 1024));
-                let sched_fail = Counter::new(counters, &name, CounterType::Error, "sched_fail");
-                let threadq_fail =
-                    Counter::new(counters, &name, CounterType::Error, "threadq_fail");
-                Ok(IfNode {
-                    name,
-                    thread_mask,
-                    intf,
-                    sched,
-                    driver: Arc::new(sock),
-                    sched_fail,
-                    threadq_fail,
-                    thread_q: Arc::new(ArrayQueue::new(VEC_SIZE)),
-                    thread_wakeup: efd,
-                })
-            }
-            Err(errno) => Err(errno),
-        }
+
+        // By default the scheduler is HFSC today, eventually there will be other options
+        let sched = sched::hfsc::Hfsc::new(common::MB!(10 * 1024));
+        let sched_fail = Counter::new(counters, &name, CounterType::Error, "sched_fail");
+        let threadq_fail = Counter::new(counters, &name, CounterType::Error, "threadq_fail");
+        Ok(IfNode {
+            name,
+            affinity,
+            intf,
+            sched,
+            driver: Some(driver),
+            sched_fail,
+            threadq_fail,
+            thread_q: Arc::new(ArrayQueue::new(VEC_SIZE)),
+            thread_wakeup: efd,
+        })
     }
 
     pub fn name(&self) -> String {
@@ -93,7 +89,11 @@ impl IfNode {
     }
 
     pub fn fd(&self) -> Option<i32> {
-        Some(self.driver.fd())
+        if let Some(ref driver) = self.driver {
+            driver.fd()
+        } else {
+            None
+        }
     }
 }
 
@@ -106,10 +106,10 @@ impl Gclient<R2Msg> for IfNode {
         let threadq_fail = Counter::new(counters, &self.name, CounterType::Error, "threadq_fail");
         Box::new(IfNode {
             name: self.name.clone(),
-            thread_mask: self.thread_mask,
+            affinity: self.affinity,
             intf: self.intf.clone(),
             sched,
-            driver: self.driver.clone(),
+            driver: None,
             sched_fail,
             threadq_fail,
             thread_q: self.thread_q.clone(),
@@ -118,7 +118,7 @@ impl Gclient<R2Msg> for IfNode {
     }
 
     fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
-        let owner_thread = (self.thread_mask & (1 << thread)) != 0;
+        let owner_thread = self.affinity.is_none() || (self.affinity == Some(thread));
         // Do packet Tx if we are the owner thread (thread the driver/device is pinnned to).
         // If so send the packet out on the driver, otherwise enqueue the packet to the MPSC
         // queue to the owner thread
@@ -127,7 +127,7 @@ impl Gclient<R2Msg> for IfNode {
                 // TODO: We have the scheduler, but we havent figured out the packet queueing
                 // model. Till then we cant really put the scheduler to use
                 if !self.sched.has_classes() {
-                    self.driver.sendmsg(&p);
+                    self.driver.as_mut().unwrap().sendmsg(vectors.pool, p);
                 }
             } else if self.thread_q.push(p).is_err() {
                 self.threadq_fail.incr();
@@ -138,7 +138,7 @@ impl Gclient<R2Msg> for IfNode {
         if owner_thread {
             while let Ok(p) = self.thread_q.pop() {
                 if !self.sched.has_classes() {
-                    self.driver.sendmsg(&p);
+                    self.driver.as_mut().unwrap().sendmsg(vectors.pool, p);
                 }
             }
         }
@@ -150,12 +150,15 @@ impl Gclient<R2Msg> for IfNode {
         // Do packet Rx, only on the thread this driver is pinned to
         if owner_thread {
             for _ in 0..VEC_SIZE {
-                let pkt = vectors.pool.pkt(self.intf.headroom);
+                let pkt = self
+                    .driver
+                    .as_mut()
+                    .unwrap()
+                    .recvmsg(vectors.pool, self.intf.headroom);
                 if pkt.is_none() {
                     break;
                 }
                 let mut pkt = pkt.unwrap();
-                self.driver.recvmsg(&mut pkt);
                 if pkt.len() == 0 {
                     break;
                 }
@@ -170,7 +173,7 @@ impl Gclient<R2Msg> for IfNode {
                 self.intf = mod_intf.intf;
             }
             R2Msg::ClassAdd(class) => {
-                if (self.thread_mask & (1 << thread)) != 0
+                if (self.affinity.is_none() || (self.affinity == Some(thread)))
                     && self
                         .sched
                         .create_class(

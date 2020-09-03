@@ -24,8 +24,11 @@ use ipv4::{create_ipv4_nodes, IPv4Ctx, RouteApis};
 mod msgs;
 use msgs::{ctrl2fwd_messages, fwd2ctrl_messages};
 mod logs;
+use clap::{App, Arg};
+use dpdk::dpdk_launch;
+use dpdk::{DpdkGlobal, PktsDpdk};
+use ini::Ini;
 use logs::LogApis;
-mod pkts;
 use perf::Perf;
 
 const THREADS: usize = 2;
@@ -34,20 +37,22 @@ const LOGLINES: usize = 1000;
 const MAX_FDS: i32 = 4000;
 const DEF_PKTS: usize = 512;
 const DEF_PARTS: usize = 2 * DEF_PKTS;
-const DEF_PARTICLE_SZ: usize = 2048;
+const DEF_PARTICLE_SZ: usize = 3072;
+const R2_CFG_FILE: &str = "/etc/r2.cfg";
 pub const MAX_HEADROOM: usize = 100;
 
 // This holds various pieces of context for all of R2, like the interface context,
 // routing context etc.. This is shared across all control threads, but NOT shared
-// to forwarding threads. So if control thread wants to modify the context it will
+// with forwarding threads. So if control thread wants to modify the context it will
 // take a lock and modify this
 pub struct R2 {
+    cfg: R2Cfg,
     counters: Counters,
     fwd2ctrl: Sender<R2Msg>,
-    nthreads: usize,
     threads: Vec<R2PerThread>,
     ifd: IfdCtx,
     ipv4: IPv4Ctx,
+    dpdk: DpdkGlobal,
 }
 
 impl R2 {
@@ -57,7 +62,7 @@ impl R2 {
         log_data: usize,
         log_size: usize,
         fwd2ctrl: Sender<R2Msg>,
-        nthreads: usize,
+        cfg: R2Cfg,
     ) -> Self {
         let counters = match Counters::new(counter_name) {
             Ok(c) => c,
@@ -65,7 +70,7 @@ impl R2 {
         };
 
         let mut threads = Vec::new();
-        for t in 0..nthreads {
+        for t in 0..cfg.nthreads {
             let name = format!("{}:{}", log_name, t);
             let logger = match Logger::new(&name, log_data, log_size) {
                 Ok(l) => Arc::new(l),
@@ -82,19 +87,28 @@ impl R2 {
         }
 
         R2 {
+            cfg,
             counters,
             fwd2ctrl,
-            nthreads,
             threads,
             ifd: IfdCtx::new(),
             ipv4: IPv4Ctx::new(),
+            dpdk: Default::default(),
         }
     }
 
-    // broadcast a message to all forwarding threads. Theres no API today to send a message
-    // to just one forwarding thread although its no big deal to do that - but the goal is
-    // to try and avoid that as much as possible and not have 'thread awareness' sprinkled
-    // all throughout the code
+    fn unicast(&mut self, msg: R2Msg, idx: usize) {
+        let t = &self.threads[idx];
+        if let Some(s) = &t.ctrl2fwd {
+            s.send(msg).unwrap();
+        }
+        t.efd.write(1);
+    }
+
+    // broadcast a message to all forwarding threads. The expectation is that everyone will
+    // use broadcast because everyone will just want to send the exact same message to all
+    // threads. But there can be exceptions like drivers which might want to send messages
+    // specific to a thread, and those rare exceptions will use unicast() above
     fn broadcast(&mut self, msg: R2Msg) {
         for t in self.threads.iter() {
             if let Some(s) = &t.ctrl2fwd {
@@ -102,6 +116,35 @@ impl R2 {
                     .unwrap();
             }
             t.efd.write(1);
+        }
+    }
+}
+
+struct R2CfgDpdk {
+    on: bool,
+    mem: usize,
+    ncores: usize,
+}
+struct R2Cfg {
+    nthreads: usize,
+    pkts: usize,
+    parts: usize,
+    part_sz: usize,
+    dpdk: R2CfgDpdk,
+}
+
+impl Default for R2Cfg {
+    fn default() -> Self {
+        R2Cfg {
+            nthreads: THREADS,
+            pkts: DEF_PKTS,
+            parts: DEF_PARTS,
+            part_sz: DEF_PARTICLE_SZ,
+            dpdk: R2CfgDpdk {
+                on: false,
+                mem: 0,
+                ncores: 0,
+            },
         }
     }
 }
@@ -167,28 +210,15 @@ fn register_apis(r2: Arc<Mutex<R2>>) -> ApiSvr {
     svr
 }
 
-// Create one forwarding thread. Each forwarding thread needs its own epoller to be woken up
-// when the thread's interfaces have pending I/O, and also to be woken up for example when
-// another thread wants to send packets via an interface this thread owns, and also woken up
-// when control thread wants to send a message to this forwarding thread.
-// NOTE: The model here is an epoll driven wakeup model - but once we have tight polling
-// drivers lke DPDK integrated, this model will change - maybe epoll wait will be taken out
-fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
-    // Channel to talk to and from control plane
-    let (sender, receiver) = channel();
-    // This is the descriptor used to wakeup the thread in genenarl, ie unlreated to any
-    // interface I/O - like when theres a control message to this thread etc..
-    let efd = r2.threads[thread].efd.clone();
-    let mut epoll = Epoll::new(efd, MAX_FDS, -1, Box::new(R2Epoll {})).unwrap();
-    r2.threads[thread].ctrl2fwd = Some(sender);
-    // The poll_fds are the descriptors that we know of at the moment (if any), when the
-    // thread is getting launched. When interfaces are created later, they will come up
-    // with their own descriptors.
-    for fd in r2.threads[thread].poll_fds.iter() {
-        epoll.add(*fd, EPOLLIN);
-    }
+struct ThreadParams {
+    thread: usize,
+    epoll: Epoll,
+    receiver: Receiver<R2Msg>,
+    g: Graph<R2Msg>,
+}
 
-    let name = format!("r2-{}", thread);
+fn launch_pthread(mut t: Box<ThreadParams>) {
+    let name = format!("r2-{}", t.thread);
     thread::Builder::new()
         .name(name)
         .spawn(move || loop {
@@ -197,36 +227,123 @@ fn create_thread(r2: &mut R2, mut g: Graph<R2Msg>, thread: usize) {
             // if the scheduler has work to be done at a future time in which case we can yield
             // till that time.
             while work {
-                let (w, _) = g.run();
+                let (w, _) = t.g.run();
                 work = w;
                 // interleave packet forwarding with checking for control messages, depending
                 // on performance measurements, this can be done (much) less frequently
-                ctrl2fwd_messages(thread, &mut epoll, &receiver, &mut g);
+                ctrl2fwd_messages(t.thread, &mut t.epoll, &t.receiver, &mut t.g);
             }
             // No more packets or control messages to process, sleep till someone wakes us up
-            epoll.wait();
+            t.epoll.wait();
         })
         .unwrap();
 }
 
+fn launch_dpdk_thread(t: Box<ThreadParams>) {
+    dpdk_launch(
+        t.thread + 1, // core-id 0 is reserved for the main dpdk lcore
+        Some(dpdk_eal_thread),
+        Box::into_raw(t) as *mut core::ffi::c_void,
+    );
+}
+
+extern "C" fn dpdk_eal_thread(arg: *mut core::ffi::c_void) -> i32 {
+    unsafe {
+        let t: Box<ThreadParams> = Box::from_raw(arg as *mut ThreadParams);
+        dpdk_thread(t);
+        0
+    }
+}
+
+fn dpdk_thread(mut t: Box<ThreadParams>) {
+    loop {
+        let mut work = true;
+        // For now we dont honor the 'time' parameter here, which mostly comes into play
+        // if the scheduler has work to be done at a future time in which case we can yield
+        // till that time.
+        while work {
+            let (w, _) = t.g.run();
+            work = w;
+            // interleave packet forwarding with checking for control messages, depending
+            // on performance measurements, this can be done (much) less frequently
+            ctrl2fwd_messages(t.thread, &mut t.epoll, &t.receiver, &mut t.g);
+        }
+    }
+}
+
+// Create one forwarding thread. Each forwarding thread needs its own epoller to be woken up
+// when the thread's interfaces have pending I/O, and also to be woken up for example when
+// another thread wants to send packets via an interface this thread owns, and also woken up
+// when control thread wants to send a message to this forwarding thread.
+// NOTE: The model here is an epoll driven wakeup model - but once we have tight polling
+// drivers lke DPDK integrated, this model will change - maybe epoll wait will be taken out
+fn create_thread(r2: &mut R2, g: Graph<R2Msg>, thread: usize) {
+    // Channel to talk to and from control plane
+    let (sender, receiver) = channel();
+    // This is the descriptor used to wakeup the thread in genenarl, ie unlreated to any
+    // interface I/O - like when theres a control message to this thread etc..
+    let efd = r2.threads[thread].efd.clone();
+    let epoll = Epoll::new(efd, MAX_FDS, -1, Box::new(R2Epoll {})).unwrap();
+    r2.threads[thread].ctrl2fwd = Some(sender);
+    // The poll_fds are the descriptors that we know of at the moment (if any), when the
+    // thread is getting launched. When interfaces are created later, they will come up
+    // with their own descriptors.
+    for fd in r2.threads[thread].poll_fds.iter() {
+        epoll.add(*fd, EPOLLIN);
+    }
+    let t = Box::new(ThreadParams {
+        thread,
+        epoll,
+        receiver,
+        g,
+    });
+
+    if r2.cfg.dpdk.on {
+        launch_dpdk_thread(t);
+    } else {
+        launch_pthread(t);
+    }
+}
+
 fn launch_threads(r2: &mut R2, graph: Graph<R2Msg>) {
-    for t in 1..r2.nthreads {
+    for t in 1..r2.cfg.nthreads {
         let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
-        let pool = Box::new(PktsHeap::new(
-            queue.clone(),
-            &mut r2.counters,
-            DEF_PKTS,
-            DEF_PARTS,
-            DEF_PARTICLE_SZ,
-        ));
-        let g = graph.clone(
-            t,
-            pool,
-            queue,
-            &mut r2.counters,
-            r2.threads[t].logger.clone(),
-        );
-        create_thread(r2, g, t);
+        let name = format!("GraphPool{}", t);
+        if r2.cfg.dpdk.on {
+            let pool = Box::new(PktsDpdk::new(
+                &name,
+                queue.clone(),
+                &mut r2.counters,
+                DEF_PKTS,
+                DEF_PARTS,
+                DEF_PARTICLE_SZ,
+            ));
+            let g = graph.clone(
+                t,
+                pool,
+                queue,
+                &mut r2.counters,
+                r2.threads[t].logger.clone(),
+            );
+            create_thread(r2, g, t);
+        } else {
+            let pool = Box::new(PktsHeap::new(
+                &name,
+                queue.clone(),
+                &mut r2.counters,
+                DEF_PKTS,
+                DEF_PARTS,
+                DEF_PARTICLE_SZ,
+            ));
+            let g = graph.clone(
+                t,
+                pool,
+                queue,
+                &mut r2.counters,
+                r2.threads[t].logger.clone(),
+            );
+            create_thread(r2, g, t);
+        }
     }
     create_thread(r2, graph, 0);
 }
@@ -241,7 +358,84 @@ fn launch_api_svr(mut svr: ApiSvr) {
         .unwrap();
 }
 
+fn parse_cfg() -> R2Cfg {
+    let matches = App::new("R2")
+        .version("1.0")
+        .author("Gopa Kumar")
+        .about("Router in Rust")
+        .arg(
+            Arg::with_name("config")
+                .short("c")
+                .long("config")
+                .value_name("FILE")
+                .help("R2 config file")
+                .takes_value(true),
+        )
+        .get_matches();
+
+    let mut ret = R2Cfg::default();
+
+    let cfg = match matches.value_of("config") {
+        Some(cfg) => cfg,
+        None => R2_CFG_FILE,
+    };
+    if let Ok(ini) = Ini::load_from_file(cfg) {
+        for (sec, prop) in ini.iter() {
+            match sec.unwrap() {
+                "general" => {
+                    for (k, v) in prop.iter() {
+                        match k {
+                            "pkts" => {
+                                ret.pkts = v.parse::<usize>().unwrap();
+                            }
+                            "particles" => {
+                                ret.parts = v.parse::<usize>().unwrap();
+                            }
+                            "particle_sz" => {
+                                ret.part_sz = v.parse::<usize>().unwrap();
+                            }
+                            "threads" => {
+                                ret.nthreads = v.parse::<usize>().unwrap();
+                            }
+                            unknown => panic!("Uknown general config {}", unknown),
+                        }
+                    }
+                }
+                "dpdk" => {
+                    for (k, v) in prop.iter() {
+                        match k {
+                            "on" => {
+                                ret.dpdk.on = v.parse::<bool>().unwrap();
+                            }
+                            "mem" => {
+                                ret.dpdk.mem = v.parse::<usize>().unwrap();
+                            }
+                            "ncores" => {
+                                ret.dpdk.ncores = v.parse::<usize>().unwrap();
+                            }
+                            unknown => panic!("Unknown dpdk config {}", unknown),
+                        }
+                    }
+                }
+                unknown => panic!("Unknown config {}", unknown),
+            }
+        }
+    }
+
+    if ret.dpdk.on {
+        // No point running dpdk without at least two cores
+        assert!(ret.dpdk.ncores > 1);
+        // Core0 is the main lcore of dpdk on which we dont run data
+        // threads. r2.nthreads is number of data threads
+        ret.nthreads = ret.dpdk.ncores - 1;
+    }
+
+    ret
+}
+
 fn main() {
+    let cfg = parse_cfg();
+
     let (sender, receiver) = channel();
     let r2_rc = Arc::new(Mutex::new(R2::new(
         common::R2CNT_SHM,
@@ -249,18 +443,35 @@ fn main() {
         LOGSZ,
         LOGLINES,
         sender,
-        THREADS,
+        cfg,
     )));
+
     let mut r2 = r2_rc.lock().unwrap();
+
     let queue = Arc::new(ArrayQueue::new(DEF_PKTS));
-    let pool = Box::new(PktsHeap::new(
-        queue.clone(),
-        &mut r2.counters,
-        DEF_PKTS,
-        DEF_PARTS,
-        DEF_PARTICLE_SZ,
-    ));
-    let mut graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
+    let mut graph;
+    if r2.cfg.dpdk.on {
+        r2.dpdk = DpdkGlobal::new(r2.cfg.dpdk.mem, r2.cfg.dpdk.ncores);
+        let pool = Box::new(PktsDpdk::new(
+            "GraphPool0",
+            queue.clone(),
+            &mut r2.counters,
+            DEF_PKTS,
+            DEF_PARTS,
+            DEF_PARTICLE_SZ,
+        ));
+        graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
+    } else {
+        let pool = Box::new(PktsHeap::new(
+            "GraphPool0",
+            queue.clone(),
+            &mut r2.counters,
+            DEF_PKTS,
+            DEF_PARTS,
+            DEF_PARTICLE_SZ,
+        ));
+        graph = Graph::<R2Msg>::new(0, pool, queue, &mut r2.counters);
+    }
     create_nodes(&mut r2, &mut graph);
     launch_threads(&mut r2, graph);
 

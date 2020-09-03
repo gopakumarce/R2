@@ -1,0 +1,14 @@
+[package]
+name = "dpdk"
+version = "0.1.0"
+authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+libc = "0.2.0"
+crossbeam-queue = "0.2.1"
+dpdk-ffi = { path = "../ffis/dpdk" }
+graph = { path = "../graph" }
+packet = { path = "../packet" }
+counters = { path = "../counters" }
+socket = { path = "../unix/socket" }

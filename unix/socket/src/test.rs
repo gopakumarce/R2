@@ -12,10 +12,22 @@ const NUM_PART: usize = 20;
 const MAX_PACKET: usize = 1500;
 const PARTICLE_SZ: usize = 512;
 
-fn packet_pool(test: &str, part_sz: usize) -> Box<dyn PacketPool> {
-    let q = Arc::new(ArrayQueue::new(NUM_PKTS));
+fn packet_free(q: Arc<ArrayQueue<BoxPkt>>, pool: &mut dyn PacketPool) {
+    while let Ok(p) = q.pop() {
+        pool.free(p);
+    }
+}
+
+fn packet_pool(test: &str, part_sz: usize, q: Arc<ArrayQueue<BoxPkt>>) -> Box<dyn PacketPool> {
     let mut counters = Counters::new(test).unwrap();
-    Box::new(PktsHeap::new(q, &mut counters, NUM_PKTS, NUM_PART, part_sz))
+    Box::new(PktsHeap::new(
+        "PKTS_HEAP",
+        q,
+        &mut counters,
+        NUM_PKTS,
+        NUM_PART,
+        part_sz,
+    ))
 }
 
 fn delete_veth() {
@@ -88,16 +100,16 @@ fn read_write() {
     let wait = Arc::new(AtomicUsize::new(0));
     let done = wait.clone();
     let tname = "rx".to_string();
-    let mut pool = packet_pool("sock_read_write_rx", MAX_PACKET);
+    let rx_q = Arc::new(ArrayQueue::new(NUM_PKTS));
+    let mut pool = packet_pool("sock_read_write_rx", MAX_PACKET, rx_q.clone());
     let handler = thread::Builder::new().name(tname).spawn(move || {
-        let raw = match RawSock::new("r2_eth2", false) {
+        let mut raw = match RawSock::new("r2_eth2", false) {
             Ok(raw) => raw,
             Err(errno) => panic!("Errno {} opening socket", errno),
         };
         assert!(raw.fd > 0);
 
-        let mut pkt = pool.pkt(0).unwrap();
-        raw.recvmsg(&mut pkt);
+        let pkt = raw.recvmsg(&mut *pool, 0).unwrap();
         let pktlen = pkt.len();
         assert_eq!(MAX_PACKET, pktlen);
         let (buf, len) = match pkt.data(0) {
@@ -108,21 +120,24 @@ fn read_write() {
         for i in 0..MAX_PACKET {
             assert_eq!(buf[i], i as u8);
         }
+        packet_free(rx_q.clone(), &mut *pool);
         done.fetch_add(1, Ordering::Relaxed);
     });
 
-    let raw = match RawSock::new("r2_eth1", false) {
+    let mut raw = match RawSock::new("r2_eth1", false) {
         Ok(raw) => raw,
         Err(errno) => panic!("Errno {} opening socket", errno),
     };
     assert!(raw.fd > 0);
     let data: Vec<u8> = (0..MAX_PACKET).map(|x| (x % 256) as u8).collect();
     // Send data as multi particle pkt
-    let mut pool = packet_pool("sock_read_write_tx", PARTICLE_SZ);
-    let mut pkt = pool.pkt(0).unwrap();
-    assert!(pkt.append(&mut *pool, &data[0..]));
+    let tx_q = Arc::new(ArrayQueue::new(NUM_PKTS));
+    let mut pool = packet_pool("sock_read_write_tx", PARTICLE_SZ, tx_q.clone());
     while wait.load(Ordering::Relaxed) == 0 {
-        assert_eq!(raw.sendmsg(&mut pkt), MAX_PACKET);
+        let mut pkt = pool.pkt(0).unwrap();
+        assert!(pkt.append(&mut *pool, &data[0..]));
+        assert_eq!(raw.sendmsg(&mut *pool, pkt), MAX_PACKET);
+        packet_free(tx_q.clone(), &mut *pool);
     }
 
     handler.unwrap().join().unwrap();

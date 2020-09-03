@@ -15,6 +15,7 @@ fn packet_pool(test: &str) -> (Box<dyn PacketPool>, Arc<ArrayQueue<BoxPkt>>) {
     let mut counters = Counters::new(test).unwrap();
     (
         Box::new(PktsHeap::new(
+            "PKTS_HEAP",
             q.clone(),
             &mut counters,
             NUM_PKTS,
@@ -69,15 +70,15 @@ fn next_name(next: Next, thread: usize) -> String {
 }
 
 struct RxNode {
-    thread_mask: u64,
+    affinity: Option<usize>,
     count: usize,
     total_count: Arc<AtomicUsize>,
 }
 
 impl RxNode {
-    fn new(thread_mask: u64) -> RxNode {
+    fn new(affinity: Option<usize>) -> RxNode {
         RxNode {
-            thread_mask,
+            affinity,
             count: 0,
             total_count: Arc::new(AtomicUsize::new(0)),
         }
@@ -103,14 +104,14 @@ struct TestMsg {}
 impl Gclient<TestMsg> for RxNode {
     fn clone(&self, _counters: &mut Counters, _log: Arc<Logger>) -> Box<dyn Gclient<TestMsg>> {
         Box::new(RxNode {
-            thread_mask: self.thread_mask,
+            affinity: self.affinity,
             count: 0,
             total_count: self.total_count.clone(),
         })
     }
 
     fn dispatch(&mut self, thread: usize, vectors: &mut Dispatch) {
-        if self.thread_mask & (1 << thread) == 0 {
+        if self.affinity.is_some() && (self.affinity != Some(thread)) {
             return;
         }
         let pkt = new_pkt(vectors.pool, self.count);
@@ -223,7 +224,7 @@ fn single_thread() {
     let log = Arc::new(Logger::new("r2_logs", 32, 1000).unwrap());
     let (pool, queue) = packet_pool("single_thread");
     let mut graph = Graph::new(0, pool, queue, &mut counters);
-    let rx = Box::new(RxNode::new(1 << 0));
+    let rx = Box::new(RxNode::new(Some(0)));
     let tx = Box::new(TxNode::new());
     let print = Box::new(PrintNode::new());
 
@@ -285,7 +286,7 @@ fn multi_thread() {
     let test_threads = 8;
     let mut rx_vec = Vec::new();
     for i in 1..=test_threads {
-        let rx = Box::new(RxNode::new(1 << i));
+        let rx = Box::new(RxNode::new(Some(i)));
         let init = GnodeInit {
             name: rx.name(),
             next_names: rx.next_names(0),

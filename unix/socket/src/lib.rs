@@ -1,10 +1,71 @@
-use packet::BoxPkt;
+use graph::Driver;
+use packet::{BoxPkt, PacketPool};
 use std::ffi::CString;
 use std::mem;
 use std::ptr;
 
 pub struct RawSock {
     fd: i32,
+}
+
+impl Driver for RawSock {
+    fn fd(&self) -> Option<i32> {
+        Some(self.fd)
+    }
+
+    fn recvmsg(&mut self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt> {
+        let pkt = (*pool).pkt(headroom);
+        if pkt.is_none() {
+            return None;
+        }
+        let mut pkt = pkt.unwrap();
+        unsafe {
+            let buf = pkt.head();
+            let mut iov: libc::iovec = mem::MaybeUninit::zeroed().assume_init();
+            let head = buf.as_ptr() as u64 + pkt.headroom() as u64;
+            iov.iov_base = head as *mut libc::c_void;
+            iov.iov_len = buf.len() - pkt.headroom();
+            let mut cmsg: [u8; 32] = mem::MaybeUninit::zeroed().assume_init();
+            let mut mhdr: libc::msghdr = mem::MaybeUninit::zeroed().assume_init();
+            mhdr.msg_name = ptr::null_mut();
+            mhdr.msg_namelen = 0 as libc::socklen_t;
+            mhdr.msg_iov = &mut iov;
+            mhdr.msg_iovlen = 1;
+            mhdr.msg_control = cmsg.as_mut_ptr() as *mut libc::c_void;
+            mhdr.msg_controllen = cmsg.len();
+            mhdr.msg_flags = 0;
+            let rv = libc::recvmsg(self.fd, &mut mhdr, libc::MSG_TRUNC);
+            if rv > 0 {
+                assert_eq!(pkt.move_tail(rv), rv);
+            }
+            Some(pkt)
+        }
+    }
+
+    fn sendmsg(&mut self, _pool: &mut dyn PacketPool, pkt: BoxPkt) -> usize {
+        unsafe {
+            let slices = pkt.slices();
+            let iov: libc::iovec = mem::MaybeUninit::zeroed().assume_init();
+            let mut iovec: Vec<libc::iovec> = vec![iov; slices.len()];
+            for i in 0..slices.len() {
+                iovec[i].iov_base = slices[i].0.as_ptr() as *mut libc::c_void;
+                iovec[i].iov_len = slices[i].1;
+            }
+            let mut mhdr: libc::msghdr = mem::MaybeUninit::zeroed().assume_init();
+            mhdr.msg_name = ptr::null_mut();
+            mhdr.msg_namelen = 0 as libc::socklen_t;
+            mhdr.msg_iov = iovec.as_mut_ptr();
+            mhdr.msg_iovlen = iovec.len();
+            mhdr.msg_control = ptr::null_mut();
+            mhdr.msg_controllen = 0;
+            mhdr.msg_flags = 0;
+            let rv = libc::sendmsg(self.fd, &mhdr, 0);
+            if rv < 0 {
+                return 0;
+            }
+            rv as usize
+        }
+    }
 }
 
 impl RawSock {
@@ -72,54 +133,6 @@ impl RawSock {
                 }
             }
             Ok(RawSock { fd })
-        }
-    }
-
-    pub fn recvmsg(&self, pkt: &mut BoxPkt) {
-        unsafe {
-            let buf = pkt.data_raw();
-            let mut iov: libc::iovec = mem::MaybeUninit::uninit().assume_init();
-            let head = buf.as_ptr() as u64 + pkt.headroom() as u64;
-            iov.iov_base = head as *mut libc::c_void;
-            iov.iov_len = buf.len() - pkt.headroom();
-            let mut cmsg: [u8; 32] = mem::MaybeUninit::uninit().assume_init();
-            let mut mhdr: libc::msghdr = mem::MaybeUninit::uninit().assume_init();
-            mhdr.msg_name = ptr::null_mut();
-            mhdr.msg_namelen = 0 as libc::socklen_t;
-            mhdr.msg_iov = &mut iov;
-            mhdr.msg_iovlen = 1;
-            mhdr.msg_control = cmsg.as_mut_ptr() as *mut libc::c_void;
-            mhdr.msg_controllen = cmsg.len();
-            mhdr.msg_flags = 0;
-            let rv = libc::recvmsg(self.fd, &mut mhdr, libc::MSG_TRUNC);
-            if rv > 0 {
-                assert_eq!(pkt.move_tail(rv), rv);
-            }
-        }
-    }
-
-    pub fn sendmsg(&self, pkt: &BoxPkt) -> usize {
-        unsafe {
-            let slices = pkt.slices();
-            let iov: libc::iovec = mem::MaybeUninit::uninit().assume_init();
-            let mut iovec: Vec<libc::iovec> = vec![iov; slices.len()];
-            for i in 0..slices.len() {
-                iovec[i].iov_base = slices[i].0.as_ptr() as *mut libc::c_void;
-                iovec[i].iov_len = slices[i].1;
-            }
-            let mut mhdr: libc::msghdr = mem::MaybeUninit::uninit().assume_init();
-            mhdr.msg_name = ptr::null_mut();
-            mhdr.msg_namelen = 0 as libc::socklen_t;
-            mhdr.msg_iov = iovec.as_mut_ptr();
-            mhdr.msg_iovlen = iovec.len();
-            mhdr.msg_control = ptr::null_mut();
-            mhdr.msg_controllen = 0;
-            mhdr.msg_flags = 0;
-            let rv = libc::sendmsg(self.fd, &mhdr, 0);
-            if rv < 0 {
-                return 0;
-            }
-            rv as usize
         }
     }
 }

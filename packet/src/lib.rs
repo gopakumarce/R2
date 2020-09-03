@@ -35,7 +35,7 @@ impl BoxPart {
         #[allow(clippy::cast_ptr_alignment)]
         let part = part as *mut Particle;
         *part = Particle {
-            raw: from_raw_parts_mut(raw, rlen),
+            raw: Some(from_raw_parts_mut(raw, rlen)),
             head: 0,
             tail: 0,
             next: None,
@@ -43,20 +43,23 @@ impl BoxPart {
         BoxPart(part)
     }
 
-    // reinit is called on a particle thats was used before and given back to the
-    // particle pool and now being allocated again from the pool
     pub fn reinit(&mut self, headroom: usize) {
-        assert!(headroom <= self.raw.len());
         self.head = headroom;
         self.tail = headroom;
         self.next = None;
     }
 }
 
+/// By default because BoxPart is a pointer to a Particle, it wont be Send because
+/// Rust will not allow pointers/addresses to be send across threads. We override
+/// it here because we have the _guarantee_ that these addresses are valid across all
+/// threads in R2
+unsafe impl Send for BoxPart {}
+
 impl Drop for BoxPart {
-    // A particle is never expected to go out of scope without
-    // being attached to a packet. The packet drop() will free
-    // the particle(s), so nothing to be done here
+    // Outside of the packet library and the PacketPool trait, no one is supposed to
+    // have access to a particle by itself, so particle will go out of scope only while
+    // its attached to a packet, and the packet free takes care of freeing particles
     fn drop(&mut self) {}
 }
 
@@ -98,39 +101,26 @@ impl BoxPkt {
     /// # Safety
     /// This function takes raw pointers and converts it into a Packet, the raw pointer
     /// should have space enough to hold the Packet structure
-    pub unsafe fn new(raw: *mut u8, particle: BoxPart, queue: Arc<ArrayQueue<BoxPkt>>) -> Self {
+    pub unsafe fn new(raw: *mut u8, queue: Arc<ArrayQueue<BoxPkt>>) -> Self {
         #[allow(clippy::cast_ptr_alignment)]
         let pkt = raw as *mut Packet;
-        *pkt = Packet {
-            particle: ManuallyDrop::new(particle),
-            length: 0,
-            l2: 0,
-            l2_len: 0,
-            l3: 0,
-            l3_len: 0,
-            in_ifindex: 0,
-            out_ifindex: 0,
-            out_l3addr: ZERO_IP,
-        };
+        *pkt = Packet::default();
         BoxPkt {
             pkt: ManuallyDrop::new(pkt),
             queue: ManuallyDrop::new(queue),
         }
     }
 
-    // reinit() is called on packets which were previously used and returned to the packet pool,
-    // and now its being allocated from the pool again
-    pub fn reinit(&mut self, headroom: usize) {
+    pub fn reinit(&mut self, particle: BoxPart) {
         self.length = 0;
         self.l2 = 0;
         self.l2_len = 0;
         self.l3 = 0;
         self.l3_len = 0;
-        self.l3_len = 0;
         self.in_ifindex = 0;
         self.out_ifindex = 0;
         self.out_l3addr = ZERO_IP;
-        self.particle.reinit(headroom);
+        self.particle = Some(ManuallyDrop::new(particle));
     }
 }
 
@@ -179,22 +169,34 @@ impl Drop for BoxPkt {
 /// hence the reason we need the Send trait
 pub trait PacketPool: Send {
     /// Allocate a packet with one particle. Expect allocation failures - hence the Option return
+    /// This is the API all graph node applications that want to create a packet, will end up using
     fn pkt(&mut self, headroom: usize) -> Option<BoxPkt>;
+
     /// Allocate a particle (with the raw data), again expect allocation failure
+    /// Very unlikely that any application will want to allocate a particle, this API will be mostly
+    /// used by device drivers which want to deal with the inner details of how a packet is composed
     fn particle(&mut self, headroom: usize) -> Option<BoxPart>;
-    /// Free a packet which has a single particle with it
+
+    /// Free a packet with no particles in it. This API will not be used by applications or even
+    /// device drivers, the packets are freed automatically like all other rust objects are freed.
+    /// This will be used only by the packet library to  put a free packet into the pool.
     fn free_pkt(&mut self, pkt: BoxPkt);
-    /// Free a particle
+
+    /// Free a single particle. This API will not be used by applications or drivers, particles are
+    /// always attached to packets, when packets go out of context and get automtically freed, the
+    /// particles also get automatically freed. This will be used only by the packet library to put
+    /// a free particle back to the pool
     fn free_part(&mut self, part: BoxPart);
+
     /// Return the fixed max-size of the particle's raw data buffer
     fn particle_sz(&self) -> usize;
 
-    /// When the packet is freed, except the first particle, give all the other particles
-    /// back to the particle pool. And then give the packet (with the first particle intact)
-    /// also back to the pool. In other words an alloc from a packet pool is more optimized
-    /// for the case of a 'single particle packet'
+    /// Free a packet with multiple particles in it, at the end all the particles and
+    /// the packet both gets freed. This method can be overridden by a pool, but we dont
+    /// expect the free to be overridden, and even if it is, it should adhere to the semantics
+    /// that freeing a packet means first freeing all particles, and then the pkt itself
     fn free(&mut self, mut pkt: BoxPkt) {
-        let mut part = pkt.particle.next.take();
+        let mut part = pkt.particle.take();
         while let Some(mut p) = part {
             let next = p.next.take();
             // The particle goes back to the pool after this, do not touch
@@ -207,6 +209,20 @@ pub trait PacketPool: Send {
         // it anymore
         self.free_pkt(pkt);
     }
+
+    /// This is an optional method, will be used only by device drivers. Device drivers
+    /// on Rx typically gets a set of particles with which they want to make a packet,
+    /// and hence the reason the particle is a parameter to the API.
+    fn pkt_with_particles(&mut self, _part: BoxPart) -> Option<BoxPkt> {
+        None
+    }
+
+    /// This is an optional method. Sometimes drivers want to know some low level details
+    /// about the pool, obviously those are drivers (like dpdk) that knows the layout of the
+    /// pool very well.
+    fn opaque(&self) -> u64 {
+        0
+    }
 }
 
 /// Here we provide a default packet pool implementation, where the Packet, Particle and
@@ -218,8 +234,6 @@ pub struct PktsHeap {
     particle_sz: usize,
 }
 
-unsafe impl Send for PktsHeap {}
-
 /// A from-heap packet/particle pool, the pool is created with a specification of the
 /// number of packets, number of particles and max-size of each particle
 impl PktsHeap {
@@ -229,6 +243,7 @@ impl PktsHeap {
     /// This API deals with constructing packets and particles starting from raw pointers,
     /// hence this is marked unsafe
     pub fn new(
+        name: &str,
         queue: Arc<ArrayQueue<BoxPkt>>,
         counters: &mut Counters,
         num_pkts: usize,
@@ -236,10 +251,9 @@ impl PktsHeap {
         particle_sz: usize,
     ) -> Self {
         assert!(num_parts >= num_pkts);
-        let parts_left = num_parts - num_pkts;
-        let particles = VecDeque::with_capacity(parts_left);
+        let particles = VecDeque::with_capacity(num_parts);
         let pkts = VecDeque::with_capacity(num_pkts);
-        let alloc_fail = Counter::new(counters, "PKTS_HEAP", CounterType::Error, "PktAllocFail");
+        let alloc_fail = Counter::new(counters, name, CounterType::Error, "PktAllocFail");
         let mut pool = PktsHeap {
             alloc_fail,
             pkts,
@@ -249,24 +263,19 @@ impl PktsHeap {
 
         unsafe {
             for _ in 0..num_pkts {
-                let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
-                let raw: *mut u8 = alloc(lraw);
-                let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
-                let part: *mut u8 = alloc(lpart);
                 let lpkt = Layout::from_size_align(BoxPkt::size(), BoxPkt::align()).unwrap();
                 let pkt: *mut u8 = alloc(lpkt);
-                pool.pkts.push_front(BoxPkt::new(
-                    pkt,
-                    BoxPart::new(part, raw, particle_sz),
-                    queue.clone(),
-                ));
+                assert_ne!(pkt, 0 as *mut u8);
+                pool.pkts.push_front(BoxPkt::new(pkt, queue.clone()));
             }
 
-            for _ in 0..parts_left {
+            for _ in 0..num_parts {
                 let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
                 let raw: *mut u8 = alloc(lraw);
+                assert_ne!(raw, 0 as *mut u8);
                 let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
                 let part: *mut u8 = alloc(lpart);
+                assert_ne!(part, 0 as *mut u8);
                 pool.particles
                     .push_front(BoxPart::new(part, raw, particle_sz));
             }
@@ -278,8 +287,14 @@ impl PktsHeap {
 impl PacketPool for PktsHeap {
     fn pkt(&mut self, headroom: usize) -> Option<BoxPkt> {
         if let Some(mut pkt) = self.pkts.pop_front() {
-            pkt.reinit(headroom);
-            Some(pkt)
+            if let Some(part) = self.particle(headroom) {
+                pkt.reinit(part);
+                Some(pkt)
+            } else {
+                self.alloc_fail.incr();
+                self.pkts.push_front(pkt);
+                None
+            }
         } else {
             self.alloc_fail.incr();
             None
@@ -297,10 +312,12 @@ impl PacketPool for PktsHeap {
     }
 
     fn free_pkt(&mut self, pkt: BoxPkt) {
+        assert!(!pkt.has_part());
         self.pkts.push_front(pkt);
     }
 
     fn free_part(&mut self, part: BoxPart) {
+        assert!(!part.has_next());
         self.particles.push_front(part);
     }
 
@@ -315,7 +332,7 @@ impl PacketPool for PktsHeap {
 // dont mandate it, usually all particles in the entire system will have the same
 // fixed raw buffer size.
 pub struct Particle {
-    raw: &'static mut [u8],
+    raw: Option<&'static mut [u8]>,
     head: usize,
     tail: usize,
     next: Option<ManuallyDrop<BoxPart>>,
@@ -326,29 +343,33 @@ impl Particle {
         self.tail - self.head
     }
 
+    pub fn has_next(&self) -> bool {
+        self.next.is_some()
+    }
+
     fn data(&self, offset: usize) -> Option<(&[u8], usize)> {
         if offset >= self.len() {
             return None;
         }
         Some((
-            &self.raw[self.head + offset..self.tail],
+            &self.raw.as_ref().unwrap()[self.head + offset..self.tail],
             self.len() - offset,
         ))
     }
 
-    fn data_raw(&self, offset: usize) -> &[u8] {
-        if offset >= self.raw.len() {
+    pub fn data_raw(&self, offset: usize) -> &[u8] {
+        if offset >= self.raw.as_ref().unwrap().len() {
             &[]
         } else {
-            &self.raw[offset..]
+            &self.raw.as_ref().unwrap()[offset..]
         }
     }
 
     fn data_raw_mut(&mut self, offset: usize) -> &mut [u8] {
-        if offset >= self.raw.len() {
+        if offset >= self.raw.as_ref().unwrap().len() {
             &mut []
         } else {
-            &mut self.raw[offset..]
+            &mut self.raw.as_mut().unwrap()[offset..]
         }
     }
 
@@ -358,12 +379,13 @@ impl Particle {
         let dlen = data.len();
         if dlen > self.head {
             let count = self.head;
-            self.raw[0..count].clone_from_slice(&data[dlen - count..dlen]);
+            self.raw.as_mut().unwrap()[0..count].clone_from_slice(&data[dlen - count..dlen]);
             self.head = 0;
             count
         } else {
             let count = dlen;
-            self.raw[self.head - count..self.head].clone_from_slice(&data[0..count]);
+            self.raw.as_mut().unwrap()[self.head - count..self.head]
+                .clone_from_slice(&data[0..count]);
             self.head -= count;
             count
         }
@@ -372,14 +394,14 @@ impl Particle {
     // Add data after the 'tail', there might not be room for all the data, add
     // as much as possible, return how much was added
     fn append(&mut self, data: &[u8]) -> usize {
-        let len = min(self.raw.len() - self.tail, data.len());
-        self.raw[self.tail..self.tail + len].clone_from_slice(&data[0..len]);
+        let len = min(self.raw.as_ref().unwrap().len() - self.tail, data.len());
+        self.raw.as_mut().unwrap()[self.tail..self.tail + len].clone_from_slice(&data[0..len]);
         self.tail += len;
         len
     }
 
     fn move_tail(&mut self, mv: isize) -> isize {
-        let len = self.raw.len() as isize;
+        let len = self.raw.as_ref().unwrap().len() as isize;
         let head = self.head as isize;
         let tail = self.tail as isize;
         let new_tail = tail + mv;
@@ -412,6 +434,16 @@ impl Particle {
     }
 }
 
+impl Default for Particle {
+    fn default() -> Self {
+        Particle {
+            raw: None,
+            head: 0,
+            tail: 0,
+            next: None,
+        }
+    }
+}
 /// The network packet structure is made up of some metadata stored in this
 /// structure plus a chain of Particles which actually hold the real network
 /// data. The packet hides the fact that data is a chain of particles, it
@@ -430,7 +462,7 @@ impl Particle {
 /// outside the file which needs to know about these structures
 pub struct Packet {
     // The first particle
-    particle: ManuallyDrop<BoxPart>,
+    particle: Option<ManuallyDrop<BoxPart>>,
     // Total length of data in the packet
     length: usize,
     // The offset (from headroom) of the layer2 header
@@ -449,10 +481,26 @@ pub struct Packet {
     pub out_l3addr: Ipv4Addr,
 }
 
+impl Default for Packet {
+    fn default() -> Self {
+        Packet {
+            particle: None,
+            length: 0,
+            l2: 0,
+            l2_len: 0,
+            l3: 0,
+            l3_len: 0,
+            in_ifindex: 0,
+            out_ifindex: 0,
+            out_l3addr: ZERO_IP,
+        }
+    }
+}
+
 #[allow(clippy::len_without_is_empty)]
 impl Packet {
     fn push_particle(&mut self, next: BoxPart) {
-        let p = self.particle.last_particle();
+        let p = self.particle.as_mut().unwrap().last_particle();
         p.next = Some(ManuallyDrop::new(next));
     }
 
@@ -460,22 +508,26 @@ impl Packet {
         self.length
     }
 
+    pub fn has_part(&self) -> bool {
+        self.particle.is_some()
+    }
+
     pub fn headroom(&self) -> usize {
-        self.particle.head
+        self.particle.as_ref().unwrap().head
     }
 
     pub fn prepend(&mut self, pool: &mut dyn PacketPool, bytes: &[u8]) -> bool {
         let mut l = bytes.len();
         while l != 0 {
-            let n = self.particle.prepend(&bytes[0..l]);
+            let n = self.particle.as_mut().unwrap().prepend(&bytes[0..l]);
             if n != l {
                 let p = pool.particle(pool.particle_sz());
                 if p.is_none() {
                     return false;
                 }
                 let p = ManuallyDrop::new(p.unwrap());
-                let prev = mem::replace(&mut self.particle, p);
-                self.particle.next = Some(prev);
+                let prev = mem::replace(&mut self.particle, Some(p));
+                self.particle.as_mut().unwrap().next = Some(prev.unwrap());
             }
             l -= n;
         }
@@ -486,7 +538,7 @@ impl Packet {
     pub fn append(&mut self, pool: &mut dyn PacketPool, bytes: &[u8]) -> bool {
         let mut offset = 0;
         while offset != bytes.len() {
-            let p = self.particle.last_particle();
+            let p = self.particle.as_mut().unwrap().last_particle();
             let n = p.append(&bytes[offset..]);
             offset += n;
             if n == 0 {
@@ -503,7 +555,7 @@ impl Packet {
     }
 
     pub fn move_tail(&mut self, mv: isize) -> isize {
-        let p = self.particle.last_particle();
+        let p = self.particle.as_mut().unwrap().last_particle();
         if p.move_tail(mv) != mv {
             0
         } else {
@@ -514,7 +566,7 @@ impl Packet {
     }
 
     fn move_head(&mut self, mv: isize) -> isize {
-        let p = &mut self.particle;
+        let p = self.particle.as_mut().unwrap();
         if p.move_head(mv) != mv {
             0
         } else {
@@ -527,7 +579,7 @@ impl Packet {
     // Consider the first byte of the packet as the l2 header, of 'len' bytes,
     // and move the first byte of the packet beyond the l2 header
     pub fn pull_l2(&mut self, len: usize) -> usize {
-        let p = &self.particle;
+        let p = self.particle.as_ref().unwrap();
         let l2 = p.head;
         let mv = len as isize;
         if self.move_head(mv) != mv {
@@ -545,14 +597,14 @@ impl Packet {
         if !self.prepend(pool, bytes) {
             return false;
         }
-        let p = &self.particle;
+        let p = self.particle.as_ref().unwrap();
         self.l2 = p.head;
         self.l2_len = bytes.len();
         true
     }
 
     pub fn set_l2(&mut self, len: usize) -> bool {
-        let p = &self.particle;
+        let p = self.particle.as_ref().unwrap();
         if p.len() >= len {
             self.l2 = p.head;
             self.l2_len = len;
@@ -566,7 +618,7 @@ impl Packet {
         if self.l2_len == 0 {
             (&[], 0)
         } else {
-            let p = &self.particle;
+            let p = self.particle.as_ref().unwrap();
             let d = p.data_raw(self.l2);
             if d.len() < self.l2_len {
                 (&[], 0)
@@ -579,7 +631,7 @@ impl Packet {
     // Consider the first byte of the packet as the l3 header, of 'len' bytes,
     // and move the first byte of the packet beyond the l3 header
     pub fn pull_l3(&mut self, len: usize) -> usize {
-        let p = &self.particle;
+        let p = self.particle.as_ref().unwrap();
         let l3 = p.head;
         let mv = len as isize;
         if self.move_head(mv) != mv {
@@ -597,14 +649,14 @@ impl Packet {
         if !self.prepend(pool, bytes) {
             return false;
         }
-        let p = &self.particle;
+        let p = self.particle.as_ref().unwrap();
         self.l3 = p.head;
         self.l3_len = bytes.len();
         true
     }
 
     pub fn set_l3(&mut self, len: usize) -> bool {
-        let p = &self.particle;
+        let p = self.particle.as_ref().unwrap();
         if p.len() >= len {
             self.l3 = p.head;
             self.l3_len = len;
@@ -618,7 +670,7 @@ impl Packet {
         if self.l3_len == 0 {
             (&[], 0)
         } else {
-            let p = &self.particle;
+            let p = self.particle.as_ref().unwrap();
             let d = p.data_raw(self.l3);
             if d.len() < self.l3_len {
                 (&[], 0)
@@ -630,7 +682,7 @@ impl Packet {
 
     pub fn data(&self, offset: usize) -> Option<(&[u8], usize)> {
         let mut l = 0;
-        let mut p = &self.particle;
+        let mut p = self.particle.as_ref().unwrap();
         loop {
             let d = p.data(offset - l);
             if d.is_some() {
@@ -646,19 +698,19 @@ impl Packet {
         None
     }
 
-    pub fn data_raw(&self) -> &[u8] {
-        let p = &self.particle;
+    pub fn head(&self) -> &[u8] {
+        let p = self.particle.as_ref().unwrap();
         p.data_raw(0)
     }
 
-    pub fn data_raw_mut(&mut self) -> &mut [u8] {
-        let p = &mut self.particle;
+    pub fn head_mut(&mut self) -> &mut [u8] {
+        let p = self.particle.as_mut().unwrap();
         p.data_raw_mut(0)
     }
 
     pub fn slices(&self) -> Vec<(&[u8], usize)> {
         let mut v = Vec::new();
-        let mut p = &self.particle;
+        let mut p = self.particle.as_ref().unwrap();
         loop {
             if let Some(t) = p.data(0) {
                 v.push(t);

@@ -1080,4 +1080,3 @@ impl InterfaceAddClassResult {
     }
   }
 }
-

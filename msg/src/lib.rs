@@ -44,14 +44,14 @@ impl GnodeAddMsg {
 
 pub struct EpollAddMsg {
     pub fd: Option<i32>,
-    pub thread_mask: u64,
+    pub thread: usize,
 }
 
 impl Clone for EpollAddMsg {
     fn clone(&self) -> EpollAddMsg {
         EpollAddMsg {
             fd: self.fd,
-            thread_mask: self.thread_mask,
+            thread: self.thread,
         }
     }
 }
