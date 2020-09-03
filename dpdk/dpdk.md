@@ -4,6 +4,15 @@ What R2 wants to leverage from DPDK is the wealth of device drivers it supports.
 the DPDK support can be phased out. We do not intend to use any other packet forwarding functionalities in DPDK. And including DPDK violates the "safety" aspect of
 Rust big time - all FFI is unsafe code! So use of DPDK should be a transit path to get us somewhere and then we replace the dependency on it (which is drivers)
 
+## Configuration
+
+In the r2 config file (see Docs/r2_config.md), add a section called dpdk as below. The on=true means R2 is running with dpdk enabled, it can be set to false and then rest of the dpdk configs dont matter because dpdk is turned off. The mem=128 says dpdk uses 128Mb for mbuf pool. The ncores=3 says that core0 is used as the main core (non data plane) and core1 and core2 are the data plane cores. core0 is used as the main core always as of today
+
+[dpdk]
+on=true
+mem=128
+ncores=3
+
 ## Packet pools
 
 R2 has the PacketPool trait in packet cargo, which is implemented for DPDK also. DPDK has the concept of mbufs with its own mbuf header with its own l3/l2 fields etc.,

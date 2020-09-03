@@ -394,6 +394,9 @@ fn parse_cfg() -> R2Cfg {
                             "particle_sz" => {
                                 ret.part_sz = v.parse::<usize>().unwrap();
                             }
+                            "threads" => {
+                                ret.nthreads = v.parse::<usize>().unwrap();
+                            }
                             unknown => panic!("Uknown general config {}", unknown),
                         }
                     }

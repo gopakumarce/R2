@@ -368,14 +368,19 @@ fn get_opt(opt: &str) -> *const libc::c_char {
     ptr
 }
 
-pub fn dpdk_init(mem_sz: usize, _ncores: usize) -> Result<(), i32> {
+pub fn dpdk_init(mem_sz: usize, ncores: usize) -> Result<(), i32> {
+    let mut lcores = "--lcores=0".to_string();
+    for c in 1..ncores {
+        lcores.push_str(",");
+        lcores.push_str(&c.to_string());
+    }
     let mut argv = vec![
         get_opt("r2"),
         get_opt("-m"),
         get_opt(&format!("{}", mem_sz)),
         get_opt("--no-huge"),
         get_opt("--no-pci"),
-        get_opt("--lcores=0,1,2"),
+        get_opt(&lcores),
         get_opt("--master-lcore=0"),
         //get_opt("--log-level=*:8"),
     ];
