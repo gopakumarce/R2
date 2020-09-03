@@ -4,11 +4,13 @@ The configuration file is by default assumed to be /etc/r2.cfg if it exists, or 
 
 # general
 
+```
 [general]
 pkts=4096
 particles=8192
 particle_sz=2048
 threads=4
+```
 
 This means that r2 should run with with a pool of 4096 packets and 8192 particles of size 2048, and total four data forwarding threads. Each of these has its defaults, so any of them can be safely omitted.
 

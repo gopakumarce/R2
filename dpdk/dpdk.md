@@ -8,10 +8,12 @@ Rust big time - all FFI is unsafe code! So use of DPDK should be a transit path 
 
 In the r2 config file (see Docs/r2_configs.md), add a section called dpdk as below. The on=true means R2 is running with dpdk enabled, it can be set to false and then rest of the dpdk configs dont matter because dpdk is turned off. The mem=128 says dpdk uses 128Mb for mbuf pool. The ncores=3 says that core0 is used as the main core (non data plane) and core1 and core2 are the data plane cores. core0 is used as the main core always as of today
 
+```
 [dpdk]
 on=true
 mem=128
 ncores=3
+```
 
 ## Packet pools
 
