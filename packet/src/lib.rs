@@ -169,18 +169,32 @@ impl Drop for BoxPkt {
 /// hence the reason we need the Send trait
 pub trait PacketPool: Send {
     /// Allocate a packet with one particle. Expect allocation failures - hence the Option return
+    /// This is the API all graph node applications that want to create a packet, will end up using
     fn pkt(&mut self, headroom: usize) -> Option<BoxPkt>;
+
     /// Allocate a particle (with the raw data), again expect allocation failure
+    /// Very unlikely that any application will want to allocate a particle, this API will be mostly
+    /// used by device drivers which want to deal with the inner details of how a packet is composed
     fn particle(&mut self, headroom: usize) -> Option<BoxPart>;
-    /// Free a packet with no particles in it
+
+    /// Free a packet with no particles in it. This API will not be used by applications or even
+    /// device drivers, the packets are freed automatically like all other rust objects are freed.
+    /// This will be used only by the packet library to  put a free packet into the pool.
     fn free_pkt(&mut self, pkt: BoxPkt);
-    /// Free a single particle
+
+    /// Free a single particle. This API will not be used by applications or drivers, particles are
+    /// always attached to packets, when packets go out of context and get automtically freed, the
+    /// particles also get automatically freed. This will be used only by the packet library to put
+    /// a free particle back to the pool
     fn free_part(&mut self, part: BoxPart);
+
     /// Return the fixed max-size of the particle's raw data buffer
     fn particle_sz(&self) -> usize;
 
-    // Free a packet with multiple particles in it, at the end all the particles and
-    // the packet both gets freed
+    /// Free a packet with multiple particles in it, at the end all the particles and
+    /// the packet both gets freed. This method can be overridden by a pool, but we dont
+    /// expect the free to be overridden, and even if it is, it should adhere to the semantics
+    /// that freeing a packet means first freeing all particles, and then the pkt itself
     fn free(&mut self, mut pkt: BoxPkt) {
         let mut part = pkt.particle.take();
         while let Some(mut p) = part {
@@ -196,14 +210,16 @@ pub trait PacketPool: Send {
         self.free_pkt(pkt);
     }
 
-    // This is an optional method typically used in a device driver (eg.dpdk) that is closely
-    // tied to the pool implementation and wants to allocate a packet with a particle provided
+    /// This is an optional method, will be used only by device drivers. Device drivers
+    /// on Rx typically gets a set of particles with which they want to make a packet,
+    /// and hence the reason the particle is a parameter to the API.
     fn pkt_with_particles(&mut self, _part: BoxPart) -> Option<BoxPkt> {
         None
     }
 
-    // This is an optional method typically used in a device driver (eg.dpdk) that is closely
-    // tied to the pool implementation and wants to know some driver specific pool properties
+    /// This is an optional method. Sometimes drivers want to know some low level details
+    /// about the pool, obviously those are drivers (like dpdk) that knows the layout of the
+    /// pool very well.
     fn opaque(&self) -> u64 {
         0
     }
