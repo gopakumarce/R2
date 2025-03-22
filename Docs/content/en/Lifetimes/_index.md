@@ -1,3 +1,10 @@
+---
+weight: 1
+type: docs
+description: >
+
+---
+
 # Lifetimes
 
 As you can see, the use of Rust's lifetime markers has not proliferated throughout the code base. This is because really there is only one structure that has a 'reference', and that is used in almost every single place in the system - that one structure is the Packet. The Packet has one or more Particle structures, and the Particle as a mutable 'raw' &[u8] slice that holds the real data in the packet.

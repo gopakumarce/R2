@@ -1,3 +1,11 @@
+---
+title: "scheduler"
+weight: 1
+type: docs
+description: >
+
+---
+
 # Scheduler
 
 The only scheduler we support today is HFSC, and the code is completely modelled after the BSD version of HFSC (the linux version is quite similar to the BSD version too). Really the only authoritative "documentation" on HFSC is <https://www.cs.cmu.edu/~hzhang/papers/SIGCOM97.pd> - thats a terse reading, so good luck with that :P

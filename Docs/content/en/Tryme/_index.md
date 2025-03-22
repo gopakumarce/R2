@@ -1,3 +1,10 @@
+---
+weight: 1
+type: docs
+description: >
+
+---
+
 # Trying R2 
 
 The goal here is to provide a test setup as below, where R2_client1 and R2_client2 are two docker containers from which we can originate packets like ping and R2 in the middle, is the router.

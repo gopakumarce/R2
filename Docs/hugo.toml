@@ -1,0 +1,9 @@
+languageCode = 'en-us'
+title = 'R2 - Router in Rust'
+baseURL = "https://gopakumarce.github.io/R2/"
+theme = "docsy"
+showSectionPages = true
+
+[languages]
+  [languages.en]
+    contentDir = "content/en"

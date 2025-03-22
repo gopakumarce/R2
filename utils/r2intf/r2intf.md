@@ -1,3 +1,11 @@
+---
+title: "r2intf"
+weight: 1
+type: docs
+description: >
+
+---
+
 # Usage
 
 This utility is used for adding a new interface and configuring the interface parameters like ip address and QoS queues. Example usages of r2intf are below

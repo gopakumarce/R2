@@ -1,3 +1,11 @@
+---
+title: "Graph"
+weight: 1
+type: docs
+description: >
+
+---
+
 # Graph
 
 This is the central piece of R2. The Graph structure consists of the following main items

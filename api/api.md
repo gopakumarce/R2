@@ -1,3 +1,11 @@
+---
+title: "API"
+weight: 1
+type: docs
+description: >
+
+---
+
 # How to write an API
 
 So here I will not talk about how to write thrift APIs or its syntax etc.. There are plenty of documentation on that in google. Once the thrift file is written, to generate rust code we have to run "thrift -out [directory] --gen rs -r [thrift API file]". This step and how to build the thrift compiler etc.. are all available documentation in google.

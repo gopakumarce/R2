@@ -1,3 +1,11 @@
+---
+title: "Counters"
+weight: 1
+type: docs
+description: >
+
+---
+
 # Shared memory counters
 
 Counters are allocated in shared memory, so that external utilities can display the counters without disturbing the R2 process. The shared memory itself is managed in unix/shm, and theres not a lot to describe there - its just standard unix shared mem. 

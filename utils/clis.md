@@ -1,3 +1,10 @@
+---
+weight: 1
+type: docs
+description: >
+
+---
+
 # CLIs using Rust Clap library
 
 Command line argument parsing is a messy and complex affair, and we by now means want to spend time writing code for that. We use the Rust Clap library, which is quite popular, quite feature rich and quite easy to use, and fairly well documented - cant ask for more! And needless to say I did not have much troubles with clap. Clap has a few different styles of programming a CLI, again refer to Clap documents for that. R2 does not mandate any particular way of using clap - feel free to use what fits your need, but my preferred style of using clap is by defining CLIs using a YAML file.

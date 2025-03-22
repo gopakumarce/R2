@@ -1,3 +1,10 @@
+---
+weight: 1
+type: docs
+description: >
+
+---
+
 # Highlights
 
 The below are aspects of R2 we want to spend time talking about, each of these will be explained in details in later sections.

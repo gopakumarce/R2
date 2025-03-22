@@ -1,3 +1,10 @@
+---
+weight: 1
+type: docs
+description: >
+
+---
+
 # Unsafe-Rust in R2
 
 Anywhere we have to deal with raw pointers, we basically end up having to use unsafe Rust. Obviously the goal is to limit that to a small set of libraries which have no option but to do pointer manipulation. That current list is below. From what I know about packet forwarding systems, this would be all about it and I dont expect any more. So this means that we have to be extremely careful what we do in these libraries and we have to vet every pointer manipulation there and ensure they are bug free if we want to rely on Rust's memory safety for rest of the code.

@@ -1,3 +1,11 @@
+---
+title: "LOG"
+weight: 1
+type: docs
+description: >
+
+---
+
 # Forwarding plane logger
 
 So the first thing to be clarified upfront is that this is NOT a general purpose syslog kind of logger. This is purely meant for forwarding path to log per-packet information, and not expected to be on by default, usually used for a limited time to collect data to debug some issue. So obviously the logger has to be a simple fast module. These are the properties of the logger

@@ -28,14 +28,8 @@ Functionally / feature-wise, R2 is a new born; we can just add ethernet interfac
 
 ## Getting familiar with R2
 
-The recommended method is to first go through the Architecture page <https://r2.rs/architecture/>, which is a high level overview of R2. And once that is done, go through the TryMe page <https://r2.rs/tryme/> and just get familiar with downloading the code, compiling it and getting R2 running with a simple two container setup. Once that is done go through the Code page <https://r2.rs/code/> to zoom a bit more into a summary of how the code in different modules work, and at that point you can refer to the code itself and go through the comments in the code. All the documentation in this website is present as markdown files in the code repository itself.
+The recommended method is to first go through the general overview page <https://gopakumarce.github.io/R2/>, which has links with a high level overview of R2. And once that is done, go through the TryMe page <https://gopakumarce.github.io/R2/tryme/> and just get familiar with downloading the code, compiling it and getting R2 running with a simple two container setup. Once that is done you can refer to the code itself accompanied by the documentation in various modules of the code
 
 ## Issues / Feature tracking
 
 See the issues section in R2's github page to see the list of bugs/enhancements to be taken up immediately
-
-## The Logo
-
-The logo depicts a macrophage. It was a funny-looking stuffed toy in my wife's microbiology lab, which turned into this cartoon version. To try and give it a software spin (as an afterthought), macrophages are constantly cleaning up "bad stuff" from a biological system - and that aligns well with the being 'Pristine'  goal of R2.  
-
-The logo is created by the talented graphics artist Shalaka <https://www.behance.net/shalakasdesign>. I tried to draw one myself and after a days worth of effort even my very basic version went nowhere. I quickly realized how much of artistic talent and skill one needs to create a logo. It was amazing to see the dexterity with which Shalaka created multiple versions of the logo in no time!

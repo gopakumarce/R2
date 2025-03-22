@@ -1,3 +1,11 @@
+---
+title: "DPDK"
+weight: 1
+type: docs
+description: >
+
+---
+
 # DPDK interacting with R2
 
 What R2 wants to leverage from DPDK is the wealth of device drivers it supports. It gives us a quick start and as and when R2 gets mature and has drivers of its own,

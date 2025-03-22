@@ -1,3 +1,11 @@
+---
+title: "packet"
+weight: 1
+type: docs
+description: >
+
+---
+
 # Packet and Particle
 
 The packet object consists of a struct Packet and a chain of struct Particle objects. There Particle objects hold the actual data - it corresponds to an mbuf / skb etc.. in the bsd / linux worlds. The packet holds just meta data like total length of the packet, the l2 and l3 header start in the data etc.. The particle object also holds minimal data like the head and tail of the actual data buffer etc.. The question about what is a good particle size etc.. are offloaded to the user of the library. Typically these days the popular particle size of choice is 2048. Which means that the standard ethernet mtu frames (1500) will fit in one particle, and a jumbo ethernet (9000) frame will need four particles chained together. As we can see, the Particle structure chains a set of particles together - and also all the Packet get_data() kind of APIs lets users get into various offsets into the packet with chaining hidden from them. Rest of the packet library is standard networking operations on a packet - push and pull data to/from the front of the packet, append/remove data to/from the tail of the packet, get offsets to data inside the packet, store the layer2 and layer3 data offsets etc.

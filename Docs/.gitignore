@@ -1,0 +1,5 @@
+public/
+resources/
+.hugo_build.lock
+themes/docsy
+themes/font-awesome

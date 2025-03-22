@@ -1,3 +1,11 @@
+---
+title: "DPDK bindgen"
+weight: 1
+type: docs
+description: >
+
+---
+
 # How to generate dpdk ffi binding APIs
 
 * install dpdk - using meson build and ninja install etc..

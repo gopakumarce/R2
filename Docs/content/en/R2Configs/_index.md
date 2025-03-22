@@ -1,3 +1,10 @@
+---
+weight: 1
+type: docs
+description: >
+
+---
+
 # Configuration file
 
 The configuration file is by default assumed to be /etc/r2.cfg if it exists, or else it can be suppled as a command line parameter 'r2 -c <config file>' .. The config file is in the INI format, same as whats used by the cargo.toml files. It has different sections explained below

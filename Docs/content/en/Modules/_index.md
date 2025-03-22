@@ -1,3 +1,10 @@
+---
+weight: 1
+type: docs
+description: >
+
+---
+
 # Modules
 
 R2 project is organized as a workspace which is a collection of independent Cargo-es (libraries). What typically happens in large software projects is that its hard to define the module dependencies, to know what module depends on what (often ending up with circular dependencies). We strive to define the dependency model here upfront.
