@@ -114,7 +114,7 @@ pub fn ip_mask_decode(ip_and_mask: &str) -> Option<(Ipv4Addr, u32)> {
         return None;
     }
     if let Ok(ipv4) = Ipv4Addr::from_str(im[0]) {
-        if let Ok(masklen) = u32::from_str_radix(im[1], 10) {
+        if let Ok(masklen) = im[1].parse::<u32>() {
             Some((ipv4, masklen))
         } else {
             None

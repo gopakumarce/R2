@@ -6,7 +6,6 @@
 #![allow(clippy::all)]
 #![allow(unused_imports)]
 #![allow(unused_extern_crates)]
-#![cfg_attr(feature = "cargo-clippy", allow(clippy::too_many_arguments, clippy::type_complexity))]
 #![cfg_attr(rustfmt, rustfmt_skip)]
 
 extern crate thrift;

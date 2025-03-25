@@ -23,12 +23,11 @@ impl RouteApis {
     fn handle_show_all(&self, filename: String) -> thrift::Result<String> {
         let mut file = match File::create(&filename) {
             Err(why) => {
-                return Err(RouteErr::new(format!(
+                return Err(From::from(RouteErr::new(format!(
                     "couldn't create {}: {}",
                     filename,
-                    why.to_string()
-                )))
-                .map_err(From::from);
+                    why
+                ))));
             }
             Ok(file) => file,
         };
@@ -63,7 +62,7 @@ impl RouteApis {
     fn handle_show_one(&self, r2: &R2, table: &IPv4Table, addr: Ipv4Addr) -> String {
         if let Some((prefix, mask, leaf)) = table.root.longest_match(addr) {
             if let ipv4::Fwd::Adjacency(adj) = &leaf.next {
-                let ifname = if let Some(name) = r2.ifd.get_name(adj.ifindex as usize) {
+                let ifname = if let Some(name) = r2.ifd.get_name(adj.ifindex) {
                     name
                 } else {
                     "Unknown_ifindex"
@@ -131,13 +130,13 @@ pub fn create_ipv4_nodes(r2: &mut R2, g: &mut Graph<R2Msg>) {
 
 fn file_write(f: &mut File, s: &str) {
     if let Err(why) = f.write(s.as_bytes()) {
-        println!("Write failed {}", why.to_string());
+        println!("Write failed {}", why);
     }
 }
 
 fn route_json_dump(f: &mut File, r2: &R2, prefix: Ipv4Addr, masklen: u32, leaf: &IPv4Leaf) {
     if let ipv4::Fwd::Adjacency(adj) = &leaf.next {
-        let ifname = if let Some(name) = r2.ifd.get_name(adj.ifindex as usize) {
+        let ifname = if let Some(name) = r2.ifd.get_name(adj.ifindex) {
             name
         } else {
             "Unknown_ifindex"
@@ -172,18 +171,17 @@ impl RouteSyncHandler for RouteApis {
             ip = i;
             mask = m;
         } else {
-            return Err(RouteErr::new("Unable to decode IP/MASK".to_string())).map_err(From::from);
+            return Err(From::from(RouteErr::new("Unable to decode IP/MASK".to_string())));
         }
         if let Ok(n) = Ipv4Addr::from_str(&nhop) {
             nhop_ip = n;
         } else {
-            return Err(RouteErr::new("Unable to decode NHOP".to_string())).map_err(From::from);
+            return Err(From::from(RouteErr::new("Unable to decode NHOP".to_string())));
         }
         if let Some(intf) = r2.ifd.get(&ifname) {
             ifindex = intf.ifindex;
         } else {
-            return Err(RouteErr::new(format!("Cannot find interface {}", ifname)))
-                .map_err(From::from);
+            return Err(From::from(RouteErr::new(format!("Cannot find interface {}", ifname))));
         }
         add_route(&mut r2, ip, mask, nhop_ip, ifindex);
         Ok(())
@@ -205,18 +203,17 @@ impl RouteSyncHandler for RouteApis {
             ip = i;
             mask = m;
         } else {
-            return Err(RouteErr::new("Unable to decode IP/MASK".to_string())).map_err(From::from);
+            return Err(From::from(RouteErr::new("Unable to decode IP/MASK".to_string())));
         }
         if let Ok(n) = Ipv4Addr::from_str(&nhop) {
             nhop_ip = n;
         } else {
-            return Err(RouteErr::new("Unable to decode NHOP".to_string())).map_err(From::from);
+            return Err(From::from(RouteErr::new("Unable to decode NHOP".to_string())));
         }
         if let Some(intf) = r2.ifd.get(&ifname) {
             ifindex = intf.ifindex;
         } else {
-            return Err(RouteErr::new(format!("Cannot find interface {}", ifname)))
-                .map_err(From::from);
+            return Err(From::from(RouteErr::new(format!("Cannot find interface {}", ifname))));
         }
         del_route(&mut r2, ip, mask, nhop_ip, ifindex);
         Ok(())
@@ -233,11 +230,10 @@ impl RouteSyncHandler for RouteApis {
         } else if prefix == "all" {
             self.handle_show_all(filename)
         } else {
-            Err(RouteErr::new(format!(
+            Err(From::from(RouteErr::new(format!(
                 "Option should be ip address or keyword 'all': {}",
                 prefix
-            )))
-            .map_err(From::from)
+            ))))
         }
     }
 }

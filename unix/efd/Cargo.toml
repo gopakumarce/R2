@@ -5,4 +5,4 @@ authors = ["Gopa Kumar <gopakumarce@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-libc = { features = [ "extra_traits" ] }
+libc = { version = "0.2.171", features = [ "extra_traits" ] }

@@ -19,22 +19,20 @@ impl LogSyncHandler for LogApis {
             let name = format!("{}:{}", filename, t.thread);
             let file = match File::create(&name) {
                 Err(why) => {
-                    return Err(LogErr::new(format!(
+                    return Err(From::from(LogErr::new(format!(
                         "couldn't create {}: {}",
                         filename,
-                        why.to_string()
-                    )))
-                    .map_err(From::from);
+                        why
+                    ))));
                 }
                 Ok(file) => file,
             };
             if let Err(why) = t.logger.serialize(file) {
-                return Err(LogErr::new(format!(
+                return Err(From::from(LogErr::new(format!(
                     "couldn't write log {}: {}",
                     name,
-                    why.to_string()
-                )))
-                .map_err(From::from);
+                    why
+                ))));
             }
         }
         Ok(())

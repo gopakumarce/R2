@@ -1,5 +1,3 @@
-use libc;
-
 pub struct Efd {
     pub fd: i32,
 }

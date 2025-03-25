@@ -11,15 +11,15 @@ use std::sync::Arc;
 
 #[derive(Copy, Clone)]
 enum Next {
-    DROP = 0,
+    Drop = 0,
     EncapMux,
 }
 
-const NEXT_NAMES: &[Next] = &[Next::DROP, Next::EncapMux];
+const NEXT_NAMES: &[Next] = &[Next::Drop, Next::EncapMux];
 
 fn next_name(next: Next) -> String {
     match next {
-        Next::DROP => names::DROP.to_string(),
+        Next::Drop => names::DROP.to_string(),
         Next::EncapMux => names::ENCAPMUX.to_string(),
     }
 }

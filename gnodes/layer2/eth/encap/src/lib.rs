@@ -60,15 +60,15 @@ impl<T> Gclient<T> for EncapMux {
 
 #[derive(Copy, Clone)]
 enum Next {
-    DROP = 0,
+    Drop = 0,
     TX,
 }
 
-const NEXT_NAMES: &[Next] = &[Next::DROP, Next::TX];
+const NEXT_NAMES: &[Next] = &[Next::Drop, Next::TX];
 
 fn next_name(ifindex: usize, next: Next) -> String {
     match next {
-        Next::DROP => names::DROP.to_string(),
+        Next::Drop => names::DROP.to_string(),
         Next::TX => names::rx_tx(ifindex),
     }
 }
@@ -177,9 +177,7 @@ impl EthEncap {
             self.cnt.bad_mac.incr();
             return;
         }
-        if self.mac.get(&ip).is_none() {
-            self.mac.insert(ip, mac);
-        }
+        self.mac.entry(ip).or_insert(mac);
     }
 
     fn add_eth_hdr(&self, pool: &mut dyn PacketPool, pkt: &mut BoxPkt, mac: &EthMacRaw) -> bool {
@@ -189,7 +187,7 @@ impl EthEncap {
         if !pkt.prepend(pool, &self.intf.l2_addr[0..ETH_ALEN]) {
             return false;
         }
-        if !pkt.prepend(pool, &(*mac.bytes)) {
+        if !pkt.prepend(pool, &mac.bytes) {
             return false;
         }
         pkt.set_l2(ETH_ALEN);

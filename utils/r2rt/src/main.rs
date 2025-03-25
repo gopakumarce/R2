@@ -33,7 +33,6 @@ fn add_del_ip(ip_and_mask: &str, nhop: &str, ifname: &str, del: bool) {
     };
     if let Err(e) = ret {
         println!("Add failed: {}", e);
-        return;
     }
 }
 
@@ -71,7 +70,7 @@ fn add_del_subcmd(matches: &ArgMatches) {
 fn show_subcmd(matches: &ArgMatches) -> String {
     let prefix = matches.value_of("PREFIX").unwrap();
     if prefix != "all" {
-        if let Err(_n) = Ipv4Addr::from_str(&prefix) {
+        if let Err(_n) = Ipv4Addr::from_str(prefix) {
             return "Prefix should be a valid ip address or keyword 'all'".to_string();
         }
     }
@@ -91,9 +90,9 @@ fn main() {
     let matches = App::from(yaml).get_matches();
 
     if let Some(matches) = matches.subcommand_matches("route") {
-        add_del_subcmd(&matches);
+        add_del_subcmd(matches);
     } else if let Some(matches) = matches.subcommand_matches("show") {
-        let show = show_subcmd(&matches);
+        let show = show_subcmd(matches);
         println!("{}", show);
     }
 }

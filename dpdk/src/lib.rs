@@ -2,12 +2,16 @@ use counters::flavors::{Counter, CounterType};
 use counters::Counters;
 use crossbeam_queue::ArrayQueue;
 use dpdk_ffi::{
-    dpdk_mbuf_alloc, dpdk_mbuf_free, dpdk_rx_one, dpdk_tx_one, lcore_function_t, rte_dev_iterator,
-    rte_dev_probe, rte_eal_init, rte_eal_remote_launch, rte_eth_conf, rte_eth_dev_configure,
-    rte_eth_dev_socket_id, rte_eth_dev_start, rte_eth_iterator_init, rte_eth_iterator_next,
-    rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, rte_eth_rx_queue_setup, rte_eth_tx_mq_mode_ETH_MQ_TX_NONE,
-    rte_eth_tx_queue_setup, rte_mbuf, rte_mempool, rte_mempool_obj_iter, rte_pktmbuf_pool_create,
-    RTE_MAX_ETHPORTS, RTE_PKTMBUF_HEADROOM, SOCKET_ID_ANY,
+    bindgen::lcore_function_t, bindgen::rte_dev_iterator, bindgen::rte_dev_probe,
+    bindgen::rte_eal_init, bindgen::rte_eal_remote_launch, bindgen::rte_eth_conf,
+    bindgen::rte_eth_dev_configure, bindgen::rte_eth_dev_socket_id, bindgen::rte_eth_dev_start,
+    bindgen::rte_eth_iterator_init, bindgen::rte_eth_iterator_next,
+    bindgen::rte_eth_rx_mq_mode_ETH_MQ_RX_NONE, bindgen::rte_eth_rx_queue_setup,
+    bindgen::rte_eth_rxconf, bindgen::rte_eth_tx_mq_mode_ETH_MQ_TX_NONE,
+    bindgen::rte_eth_tx_queue_setup, bindgen::rte_eth_txconf, bindgen::rte_mbuf,
+    bindgen::rte_mempool, bindgen::rte_mempool_obj_iter, bindgen::rte_pktmbuf_pool_create,
+    bindgen::RTE_MAX_ETHPORTS, bindgen::RTE_PKTMBUF_HEADROOM, bindgen::SOCKET_ID_ANY,
+    dpdk_mbuf_alloc, dpdk_mbuf_free, dpdk_rx_one, dpdk_tx_one,
 };
 use graph::Driver;
 use packet::{BoxPart, BoxPkt, PacketPool};
@@ -63,7 +67,7 @@ unsafe extern "C" fn dpdk_init_mbuf(
     let m: *mut rte_mbuf = mbuf as *mut rte_mbuf;
     let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
     let part: *mut u8 = alloc(lpart);
-    assert_ne!(part, 0 as *mut u8);
+    assert_ne!(part, std::ptr::null_mut::<u8>());
     let mut mbufptr: *mut *mut rte_mbuf = (*m).buf_addr as *mut *mut rte_mbuf;
     *mbufptr = m;
     mbufptr = mbufptr.add(1);
@@ -90,15 +94,19 @@ impl PktsDpdk {
             pkts,
             particle_sz,
         };
-        assert_ne!(dpdk_pool, 0 as *mut rte_mempool);
+        assert_ne!(dpdk_pool, std::ptr::null_mut::<rte_mempool>());
         unsafe {
             for _ in 0..num_pkts {
                 let lpkt = Layout::from_size_align(BoxPkt::size(), BoxPkt::align()).unwrap();
                 let pkt: *mut u8 = alloc(lpkt);
-                assert_ne!(pkt, 0 as *mut u8);
+                assert_ne!(pkt, std::ptr::null_mut::<u8>());
                 pool.pkts.push_front(BoxPkt::new(pkt, queue.clone()));
             }
-            rte_mempool_obj_iter(dpdk_pool, Some(dpdk_init_mbuf), 0 as *mut core::ffi::c_void);
+            rte_mempool_obj_iter(
+                dpdk_pool,
+                Some(dpdk_init_mbuf),
+                std::ptr::null_mut::<core::ffi::c_void>(),
+            );
         }
         pool
     }
@@ -247,9 +255,7 @@ impl Dpdk {
     fn init(&mut self, pool: &mut dyn PacketPool) -> Result<(), PortInitErr> {
         let mbuf_pool = pool.opaque() as *mut rte_mempool;
         unsafe {
-            if let Err(err) = dpdk_queue_cfg(self.port, N_RX_DESC, N_TX_DESC, mbuf_pool) {
-                return Err(err);
-            }
+            dpdk_queue_cfg(self.port, N_RX_DESC, N_TX_DESC, mbuf_pool)?;
             if rte_eth_dev_start(self.port) < 0 {
                 return Err(PortInitErr::StartFail);
             }
@@ -269,7 +275,7 @@ impl Driver for Dpdk {
         // We could have added some kind of node-init() API per node rather than doing it like this here,
         // thats something to be considered for future if more nodes need a run time init
         if !self.init_done {
-            if let Err(_) = self.init(pool) {
+            if self.init(pool).is_err() {
                 self.init_fail.add(1);
                 return None;
             }
@@ -279,7 +285,7 @@ impl Driver for Dpdk {
         if headroom > HEADROOM {
             return None;
         }
-        let mut m: *mut rte_mbuf = 0 as *mut rte_mbuf;
+        let mut m: *mut rte_mbuf = std::ptr::null_mut::<rte_mbuf>();
         let nrx = dpdk_rx_one(self.port, 0, &mut m);
         if nrx == 0 {
             None
@@ -317,7 +323,7 @@ impl Driver for Dpdk {
         // We could have added some kind of node-init() API per node rather than doing it like this here,
         // thats something to be considered for future if more nodes need a run time init
         if !self.init_done {
-            if let Err(_) = self.init(pool) {
+            if self.init(pool).is_err() {
                 self.init_fail.add(1);
                 return 0;
             }
@@ -340,8 +346,7 @@ impl Driver for Dpdk {
             // As soon as pkt goes out of scope, rust will free it, so we need to bump up refcnt
             // so that dpdk still has valid mbuf with it. We are not using any atomic ops here
             // because we use one pool per thread.
-            (*mbuf).__bindgen_anon_2.refcnt_atomic.cnt =
-                (*mbuf).__bindgen_anon_2.refcnt_atomic.cnt + 1;
+            (*mbuf).__bindgen_anon_2.refcnt_atomic.cnt += 1;
             if dpdk_tx_one(self.port, 0, &mut mbuf) != 1 {
                 dpdk_mbuf_free(mbuf);
                 self.send_err.add(1);
@@ -371,7 +376,7 @@ fn get_opt(opt: &str) -> *const libc::c_char {
 pub fn dpdk_init(mem_sz: usize, ncores: usize) -> Result<(), i32> {
     let mut lcores = "--lcores=0".to_string();
     for c in 1..ncores {
-        lcores.push_str(",");
+        lcores.push(',');
         lcores.push_str(&c.to_string());
     }
     let mut argv = vec![
@@ -399,6 +404,7 @@ pub fn dpdk_init(mem_sz: usize, ncores: usize) -> Result<(), i32> {
     }
 }
 
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn dpdk_launch(core: usize, dpdk_thread: lcore_function_t, arg: *mut core::ffi::c_void) {
     unsafe {
         rte_eal_remote_launch(dpdk_thread, arg, core as u32);
@@ -417,7 +423,7 @@ fn dpdk_port_cfg(port: u16) -> Result<(), PortInitErr> {
         let mut cfg: rte_eth_conf = mem::MaybeUninit::zeroed().assume_init();
         cfg.rxmode.mq_mode = rte_eth_rx_mq_mode_ETH_MQ_RX_NONE;
         cfg.txmode.mq_mode = rte_eth_tx_mq_mode_ETH_MQ_TX_NONE;
-        if rte_eth_dev_configure(port, 1, 1, &mut cfg) < 0 {
+        if rte_eth_dev_configure(port, 1, 1, &cfg) < 0 {
             return Err(PortInitErr::ConfigFail);
         }
     }
@@ -436,7 +442,7 @@ fn dpdk_queue_cfg(
             0,
             n_rxd,
             rte_eth_dev_socket_id(port) as u32,
-            0 as *const dpdk_ffi::rte_eth_rxconf,
+            std::ptr::null::<rte_eth_rxconf>(),
             pool,
         );
         if ret != 0 {
@@ -447,7 +453,7 @@ fn dpdk_queue_cfg(
             0,
             n_txd,
             rte_eth_dev_socket_id(port) as u32,
-            0 as *const dpdk_ffi::rte_eth_txconf,
+            std::ptr::null::<rte_eth_txconf>(),
         );
         if ret != 0 {
             return Err(PortInitErr::QueueFail);
@@ -481,14 +487,8 @@ fn dpdk_port_probe(intf: &str, af_idx: u16) -> Result<u16, PortInitErr> {
 }
 
 fn dpdk_af_packet_init(intf: &str, af_idx: u16) -> Result<u16, PortInitErr> {
-    let port: u16;
-    match dpdk_port_probe(intf, af_idx) {
-        Err(err) => return Err(err),
-        Ok(p) => port = p,
-    };
-    if let Err(err) = dpdk_port_cfg(port) {
-        return Err(err);
-    }
+    let port: u16 = dpdk_port_probe(intf, af_idx)?;
+    dpdk_port_cfg(port)?;
     Ok(port)
 }
 

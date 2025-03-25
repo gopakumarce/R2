@@ -1,6 +1,4 @@
 use common::time_nsecs;
-use libc;
-use shm;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::Write;
@@ -139,7 +137,7 @@ impl Serial {
         let mut first = true;
         for v in self.vals.iter() {
             if !first {
-                s.push_str(",");
+                s.push(',');
             }
             s.push_str(&format!("{}", v));
             first = false;
@@ -284,7 +282,7 @@ impl Logger {
                             1 => *(base as *mut u8) as u64,
                             2 => *(base as *mut u16) as u64,
                             4 => *(base as *mut u32) as u64,
-                            8 => *(base as *mut u64) as u64,
+                            8 => *(base as *mut u64),
                             _ => panic!("Bad entry size {}", sz),
                         })
                     }

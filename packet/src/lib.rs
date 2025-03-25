@@ -265,17 +265,17 @@ impl PktsHeap {
             for _ in 0..num_pkts {
                 let lpkt = Layout::from_size_align(BoxPkt::size(), BoxPkt::align()).unwrap();
                 let pkt: *mut u8 = alloc(lpkt);
-                assert_ne!(pkt, 0 as *mut u8);
+                assert_ne!(pkt, std::ptr::null_mut::<u8>());
                 pool.pkts.push_front(BoxPkt::new(pkt, queue.clone()));
             }
 
             for _ in 0..num_parts {
                 let lraw = Layout::from_size_align(particle_sz, Self::PARTICLE_ALIGN).unwrap();
                 let raw: *mut u8 = alloc(lraw);
-                assert_ne!(raw, 0 as *mut u8);
+                assert_ne!(raw, std::ptr::null_mut::<u8>());
                 let lpart = Layout::from_size_align(BoxPart::size(), BoxPart::align()).unwrap();
                 let part: *mut u8 = alloc(lpart);
-                assert_ne!(part, 0 as *mut u8);
+                assert_ne!(part, std::ptr::null_mut::<u8>());
                 pool.particles
                     .push_front(BoxPart::new(part, raw, particle_sz));
             }
@@ -331,6 +331,7 @@ impl PacketPool for PktsHeap {
 // particle in a packet will have the same fixed size 'raw' buffers. Though we
 // dont mandate it, usually all particles in the entire system will have the same
 // fixed raw buffer size.
+#[derive(Default)]
 pub struct Particle {
     raw: Option<&'static mut [u8]>,
     head: usize,
@@ -434,16 +435,6 @@ impl Particle {
     }
 }
 
-impl Default for Particle {
-    fn default() -> Self {
-        Particle {
-            raw: None,
-            head: 0,
-            tail: 0,
-            next: None,
-        }
-    }
-}
 /// The network packet structure is made up of some metadata stored in this
 /// structure plus a chain of Particles which actually hold the real network
 /// data. The packet hides the fact that data is a chain of particles, it

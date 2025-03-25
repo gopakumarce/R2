@@ -150,8 +150,7 @@ pub fn create_interface_node(
     let thread = r2.ifd.last_thread;
     r2.ifd.last_thread = (thread + 1) % r2.cfg.nthreads;
     let efd = r2.threads[thread].efd.clone();
-    let intf;
-    if r2.cfg.dpdk.on {
+    let intf = if r2.cfg.dpdk.on {
         let params = dpdk::Params {
             name: ifname,
             hw: DpdkHw::AfPacket,
@@ -160,7 +159,7 @@ pub fn create_interface_node(
             Ok(dpdk) => dpdk,
             Err(err) => panic!("Error {:?} creating dpdk port", err),
         };
-        intf = match IfNode::new(
+        match IfNode::new(
             &mut r2.counters,
             Some(thread),
             efd,
@@ -169,13 +168,13 @@ pub fn create_interface_node(
         ) {
             Ok(intf) => intf,
             Err(errno) => return Err(-errno),
-        };
+        }
     } else {
         let sock = match RawSock::new(ifname, true) {
             Ok(sock) => sock,
             Err(errno) => return Err(-errno),
         };
-        intf = match IfNode::new(
+        match IfNode::new(
             &mut r2.counters,
             Some(thread),
             efd,
@@ -184,8 +183,8 @@ pub fn create_interface_node(
         ) {
             Ok(intf) => intf,
             Err(errno) => return Err(-errno),
-        };
-    }
+        }
+    };
     // If the interface has file descriptors that indicate I/O readiness, we add it to the
     // list of descriptors we are polling on. Every forwarding thread is polling on its own
     // set of descriptors, every thread will receive this message, but only the ones marked
@@ -224,7 +223,7 @@ pub fn create_interface_node(
     // And finally send the message to the thread that wants to do device I/O
     r2.unicast(msg, io.unwrap());
 
-    r2.ifd.add(ifname, ifindex as usize, interface.clone());
+    r2.ifd.add(ifname, ifindex, interface.clone());
     create_eth_nodes(r2, interface);
 
     Ok(())
@@ -236,27 +235,23 @@ impl InterfaceSyncHandler for InterfaceApis {
         if let Some(mac) = fwd::str_to_mac(&mac) {
             l2_addr = mac;
         } else {
-            return Err(InterfaceErr::new(
+            return Err(From::from(InterfaceErr::new(
                 "Unable to decode mac address".to_string(),
-            ))
-            .map_err(From::from);
+            )));
         }
         let mut r2 = self.r2.lock().unwrap();
-        if r2.ifd.name2idx.get(&name).is_some()
-            || r2.ifd.idx2name.get(&(ifindex as usize)).is_some()
+        if r2.ifd.name2idx.contains_key(&name) || r2.ifd.idx2name.contains_key(&(ifindex as usize))
         {
-            return Err(InterfaceErr::new(format!(
+            return Err(From::from(InterfaceErr::new(format!(
                 "Interface {}, index {} exists",
                 name, ifindex
-            )))
-            .map_err(From::from);
+            ))));
         }
         if let Err(errno) = create_interface_node(&mut r2, &name, ifindex as usize, l2_addr) {
-            return Err(InterfaceErr::new(format!(
+            return Err(From::from(InterfaceErr::new(format!(
                 "Cannot create interface, errno {}",
                 errno
-            )))
-            .map_err(From::from);
+            ))));
         };
         Ok(())
     }
@@ -271,22 +266,25 @@ impl InterfaceSyncHandler for InterfaceApis {
             intf = i;
             ifindex = intf.ifindex;
         } else {
-            return Err(InterfaceErr::new(format!(
+            return Err(From::from(InterfaceErr::new(format!(
                 "Cannot find interface {}",
                 ifname
-            )))
-            .map_err(From::from);
+            ))));
         }
         if let Some((a, m)) = fwd::ip_mask_decode(&ip_and_mask) {
             addr = a;
             masklen = m;
         } else {
-            return Err(InterfaceErr::new(format!("Bad IP/MASK {}", ip_and_mask)))
-                .map_err(From::from);
+            return Err(From::from(InterfaceErr::new(format!(
+                "Bad IP/MASK {}",
+                ip_and_mask
+            ))));
         }
         if addr == ZERO_IP || masklen == 0 {
-            return Err(InterfaceErr::new(format!("ZERO IP/MASK {}", ip_and_mask)))
-                .map_err(From::from);
+            return Err(From::from(InterfaceErr::new(format!(
+                "ZERO IP/MASK {}",
+                ip_and_mask
+            ))));
         }
         let (cur_addr, cur_masklen) = intf.get_v4addr();
         let mut new_intf = (**intf).clone();
@@ -329,11 +327,10 @@ impl InterfaceSyncHandler for InterfaceApis {
         if let Some(i) = r2.ifd.interfaces.get(&ifname) {
             intf = i;
         } else {
-            return Err(InterfaceErr::new(format!(
+            return Err(From::from(InterfaceErr::new(format!(
                 "Cannot find interface {}",
                 ifname
-            )))
-            .map_err(From::from);
+            ))));
         }
         let curves = unwrap_curves(&curves);
         // For QoS, we cant really have the control thread update a copy of the QoS heirarchy and

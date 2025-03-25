@@ -15,9 +15,7 @@ impl Driver for RawSock {
 
     fn recvmsg(&mut self, pool: &mut dyn PacketPool, headroom: usize) -> Option<BoxPkt> {
         let pkt = (*pool).pkt(headroom);
-        if pkt.is_none() {
-            return None;
-        }
+        pkt.as_ref()?;
         let mut pkt = pkt.unwrap();
         unsafe {
             let buf = pkt.head();
@@ -99,7 +97,7 @@ impl RawSock {
                 return Err(*(libc::__errno_location()));
             }
             let c_str = CString::new(interface).unwrap();
-            let ifname = c_str.as_ptr() as *const i8;
+            let ifname = c_str.as_ptr();
             let index = libc::if_nametoindex(ifname);
             if index == 0 {
                 return Err(*(libc::__errno_location()));

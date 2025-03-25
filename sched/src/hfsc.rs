@@ -8,7 +8,7 @@ const SM_SHIFT: usize = 24;
 const ISM_SHIFT: usize = 10;
 const SM_MASK: u64 = (1 << SM_SHIFT) - 1;
 const ISM_MASK: u64 = (1 << ISM_SHIFT) - 1;
-const HT_INFINITY: u64 = std::u64::MAX;
+const HT_INFINITY: u64 = u64::MAX;
 const HFSC_FREQ: u64 = 1_000_000_000;
 
 struct Key {
@@ -284,7 +284,7 @@ impl Hfsc {
         is_leaf: bool,
         curves: Curves,
     ) -> Result<(), String> {
-        if self.class_names.get(&name).is_some() {
+        if self.class_names.contains_key(&name) {
             return Err("Class already exits".to_string());
         }
         let parent;
@@ -313,11 +313,7 @@ impl Hfsc {
     }
 
     pub fn class_index(&self, name: String) -> Option<usize> {
-        if let Some(idx) = self.class_names.get(&name) {
-            Some(*idx)
-        } else {
-            None
-        }
+        self.class_names.get(&name).copied()
     }
 
     pub fn destroy_class(&mut self, index: usize) -> usize {
@@ -343,7 +339,7 @@ impl Hfsc {
     }
 
     fn get_min_d(&self, time: u64) -> usize {
-        let mut deadline = std::u64::MAX;
+        let mut deadline = u64::MAX;
         let mut class = 0;
 
         for (_key, child) in self.eligible.iter() {
@@ -359,7 +355,7 @@ impl Hfsc {
         class
     }
 
-    fn get_min_v(&mut self, parent: usize, time: u64) -> usize {
+    fn get_min_v(&mut self, parent: usize, _time: u64) -> usize {
         let p = &self.classes[parent];
         let ch;
         if let Some((_key, child)) = p.children.iter().next() {
@@ -371,11 +367,11 @@ impl Hfsc {
         assert_eq!(self.classes[ch].parent, parent);
         let vtime = self.classes[ch].vtime;
         let leaf = self.classes[ch].leaf;
-        let mut p = &mut self.classes[parent];
+        let p = &mut self.classes[parent];
         if vtime > p.vmin {
             p.vmin = vtime;
         }
-        let r = self.get_min_v(ch, time);
+        let r = self.get_min_v(ch, _time);
         if r == 0 {
             if leaf {
                 ch
@@ -387,20 +383,20 @@ impl Hfsc {
         }
     }
 
-    fn update_v(&mut self, class: usize, len: usize, time: u64, passive: bool) {
+    fn update_v(&mut self, class: usize, len: usize, _time: u64, passive: bool) {
         let key;
         let go_passive;
         let pvmin;
         let pindex;
         {
-            let mut c = &mut self.classes[class];
+            let c = &mut self.classes[class];
             pindex = c.parent;
             if pindex == 0 {
                 return;
             }
             c.f_bytes += len as u64;
             if c.nactive == 0 {
-                self.update_v(pindex, len, time, passive);
+                self.update_v(pindex, len, _time, passive);
                 return;
             }
 
@@ -420,7 +416,7 @@ impl Hfsc {
             parent.children.remove(&key);
         }
         if go_passive {
-            let mut parent = &mut self.classes[pindex];
+            let parent = &mut self.classes[pindex];
             if key.time > parent.vmax {
                 parent.vmax = key.time;
             }
@@ -441,14 +437,14 @@ impl Hfsc {
             let parent = &mut self.classes[pindex];
             parent.children.insert(key, class);
         }
-        self.update_v(pindex, len, time, go_passive);
+        self.update_v(pindex, len, _time, go_passive);
     }
 
-    fn init_v(&mut self, class: usize, len: usize, active: bool) {
+    fn init_v(&mut self, class: usize, _len: usize, active: bool) {
         let go_active;
         let pindex;
         {
-            let mut c = &mut self.classes[class];
+            let c = &mut self.classes[class];
             pindex = c.parent;
             if pindex == 0 {
                 return;
@@ -479,7 +475,7 @@ impl Hfsc {
                 }
             }
             if max_child != 0 {
-                let mut c = &mut self.classes[class];
+                let c = &mut self.classes[class];
                 let mut vt = max_vtime;
                 if pvmin != 0 {
                     vt = (pvmin + vt) / 2;
@@ -524,7 +520,7 @@ impl Hfsc {
             }
             let parent = &mut self.classes[pindex];
             parent.children.insert(key, class);
-            self.init_v(pindex, len, go_active);
+            self.init_v(pindex, _len, go_active);
         }
     }
 
@@ -534,7 +530,7 @@ impl Hfsc {
         }
         let qlen;
         {
-            let mut c = &mut self.classes[classid];
+            let c = &mut self.classes[classid];
             qlen = c.packets.len();
             if c.qlimit != 0 && qlen >= c.qlimit {
                 c.qdrops += 1;
@@ -565,7 +561,7 @@ impl Hfsc {
 
         let child = self.get_min_d(time);
         if child != 0 {
-            let mut c = &mut self.classes[child];
+            let c = &mut self.classes[child];
             if let Some(pkt) = c.packets.pop_front() {
                 c.r_bytes += pkt.len() as u64;
                 let qempty = c.packets.is_empty();
@@ -731,7 +727,7 @@ impl Class {
     fn init_ed(&mut self, next_len: usize, cur_time: u64) {
         if let Some(ref r_isc) = self.r_isc {
             /* update the deadline curve */
-            rtsc_min(&mut self.d_run, &r_isc, cur_time, self.f_bytes);
+            rtsc_min(&mut self.d_run, r_isc, cur_time, self.f_bytes);
 
             /*
              * update the eligible curve.

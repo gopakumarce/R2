@@ -21,16 +21,16 @@ use std::sync::Arc;
 
 #[derive(Copy, Clone)]
 enum Next {
-    DROP = 0,
+    Drop = 0,
     L3Ipv4Parse,
     TX,
 }
 
-const NEXT_NAMES: &[Next] = &[Next::DROP, Next::L3Ipv4Parse, Next::TX];
+const NEXT_NAMES: &[Next] = &[Next::Drop, Next::L3Ipv4Parse, Next::TX];
 
 fn next_name(ifindex: usize, next: Next) -> String {
     match next {
-        Next::DROP => names::DROP.to_string(),
+        Next::Drop => names::DROP.to_string(),
         Next::L3Ipv4Parse => names::L3_IPV4_PARSE.to_string(),
         Next::TX => names::rx_tx(ifindex),
     }
@@ -193,20 +193,15 @@ impl EthDecap {
     }
 
     fn mac_learn(&mut self, ip: Ipv4Addr, mac: &[u8]) {
-        if self.mac.get(&ip).is_some() {
-            // do nothing
-        } else {
+        if let std::collections::hash_map::Entry::Vacant(e) = self.mac.entry(ip) {
             let mut bytes = Vec::new();
             bytes.extend(mac);
             let raw = EthMacRaw {
                 bytes: Arc::new(bytes),
             };
-            self.mac.insert(
-                ip,
-                EthMacRaw {
-                    bytes: raw.bytes.clone(),
-                },
-            );
+            e.insert(EthMacRaw {
+                bytes: raw.bytes.clone(),
+            });
             if self
                 .sender
                 .send(EthMacAdd(EthMacAddMsg {
@@ -218,6 +213,8 @@ impl EthDecap {
             {
                 self.cnt.mac_send_fail.incr();
             }
+        } else {
+            // do nothing
         }
     }
 
@@ -267,9 +264,7 @@ impl EthDecap {
             self.cnt.bad_mac.incr();
             return;
         }
-        if self.mac.get(&ip).is_none() {
-            self.mac.insert(ip, mac);
-        }
+        self.mac.entry(ip).or_insert(mac);
     }
 }
 

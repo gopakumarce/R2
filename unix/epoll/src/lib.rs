@@ -1,5 +1,4 @@
 use efd::Efd;
-use libc;
 use std::sync::Arc;
 
 pub const EPOLLIN: u32 = libc::EPOLLIN as u32;

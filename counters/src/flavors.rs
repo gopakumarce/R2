@@ -225,11 +225,7 @@ impl CounterRO {
         ctype: CounterType,
         name: &str,
     ) -> Option<CounterRO> {
-        if let Some(cntr) = parent.hash.get(&counter_name(node, ctype, name)) {
-            Some(cntr.clone())
-        } else {
-            None
-        }
+        parent.hash.get(&counter_name(node, ctype, name)).cloned()
     }
 
     pub fn num_cntrs(&self) -> usize {

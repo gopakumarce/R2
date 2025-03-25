@@ -17,7 +17,6 @@ fn interface_add(ifname: String, ifindex: i32, mac: String) {
 
     if let Err(e) = client.add_if(ifname, ifindex, mac) {
         println!("Add failed: {}", e);
-        return;
     }
 }
 
@@ -33,7 +32,6 @@ fn add_ip(ifname: String, ip_and_mask: String) {
 
     if let Err(e) = client.add_ip(ifname, ip_and_mask) {
         println!("Add failed: {}", e);
-        return;
     }
 }
 
@@ -65,7 +63,6 @@ fn class_add_del(
             curves,
         ) {
             println!("Add failed: {}", e);
-            return;
         }
     }
 }
@@ -161,10 +158,10 @@ fn main() {
     let ifname = matches.value_of("IFNAME").unwrap();
 
     if let Some(matches) = matches.subcommand_matches("add") {
-        add_subcmd(ifname, &matches);
+        add_subcmd(ifname, matches);
     } else if let Some(matches) = matches.subcommand_matches("class") {
-        class_subcmd(ifname, &matches);
+        class_subcmd(ifname, matches);
     } else if let Some(matches) = matches.subcommand_matches("ip") {
-        ip_subcmd(ifname, &matches);
+        ip_subcmd(ifname, matches);
     }
 }

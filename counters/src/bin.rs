@@ -22,12 +22,12 @@ impl Bin {
     /// max: The total size of the range of memory. range is 0 to max
     /// pagesz: If we need more objects in a bin, we allocate a minimum of pagesz/object-size
     pub fn new(mut binsz: u32, max: u64, pagesz: u32) -> Bin {
-        binsz = pow2_u32(binsz as u32);
+        binsz = pow2_u32(binsz);
         Bin {
             binsz,
             max,
             zeroes: binsz.leading_zeros(),
-            pagesz: pow2_u32(pagesz as u32),
+            pagesz: pow2_u32(pagesz),
             offset: 0,
             bins: Vec::new(),
         }
@@ -35,7 +35,7 @@ impl Bin {
 
     // The Bin::bins[index] into which an object of 'size' will fit into
     fn index(&self, size: u32) -> (u32, usize) {
-        let size = pow2_u32(size as u32);
+        let size = pow2_u32(size);
         let size = cmp::max(size, self.binsz);
         let index = self.zeroes - size.leading_zeros();
         (size, index as usize)

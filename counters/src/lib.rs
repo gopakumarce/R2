@@ -160,7 +160,7 @@ impl Counters {
                         let bytes = name.as_bytes();
                         for (n, byte) in bytes.iter().enumerate() {
                             let n8 = (naddr + n as u64) as *mut u8;
-                            *n8 = *byte as u8;
+                            *n8 = *byte;
                         }
                         let d = daddr as *mut Dir;
                         (*d).name_off = (naddr - self.base) as u32;
@@ -248,10 +248,7 @@ impl CountersRO {
                     let names = (counters.base + (dir.name_off + i) as u64) as *const u8;
                     vec_names.push(*names);
                 }
-                let name = match str::from_utf8(&vec_names[0..]) {
-                    Ok(name) => name,
-                    Err(_) => "UNKNOWN",
-                };
+                let name = str::from_utf8(&vec_names[0..]).unwrap_or("UNKNOWN");
                 let cntr = CounterRO::new(counters.base + dir.vec_off as u64, dir.vec_len);
                 counters.hash.insert(name.to_string(), cntr);
             }

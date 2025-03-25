@@ -2,7 +2,8 @@
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 
-include!("bindgen/include/lib.rs");
+pub mod bindgen;
+use bindgen::{rte_eth_devices, rte_mbuf, rte_mempool, rte_mempool_ops, rte_mempool_ops_table};
 
 // Included below are APIs which we would have 'liked' bindgen to create a
 // binding for but it did not, for whatever reason. One common reason being
@@ -12,8 +13,10 @@ include!("bindgen/include/lib.rs");
 
 // This is rte_eth_rx_burst() which is declared as inline and hence bindgen
 // does not generate the bindings.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn dpdk_rx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u16 {
     unsafe {
+        #[allow(static_mut_refs)]
         let devices = rte_eth_devices.as_ptr();
         let dev = devices.add(port_id as usize);
         let cb = (*dev).rx_pkt_burst.unwrap();
@@ -24,8 +27,10 @@ pub fn dpdk_rx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u
 
 // This is rte_eth_tx_burst() which is declared as inline and hence bindgen
 // does not generate the bindings.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn dpdk_tx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u16 {
     unsafe {
+        #[allow(static_mut_refs)]
         let devices = rte_eth_devices.as_ptr();
         let dev = devices.add(port_id as usize);
         let cb = (*dev).tx_pkt_burst.unwrap();
@@ -37,6 +42,7 @@ pub fn dpdk_tx_one(port_id: u16, queue_id: usize, mbuf: *mut *mut rte_mbuf) -> u
 // This is rte_pktmbuf_alloc() which is declared as inline and hence bindgen
 // does not generate the bindings. The original rte_pktmbuf_alloc() has cache
 // allocation etc. which is ignored below, it directly goes to the pool
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn dpdk_mbuf_free(m: *mut rte_mbuf) {
     unsafe {
         let mbuf: *mut core::ffi::c_void = m as *mut core::ffi::c_void;
@@ -50,13 +56,14 @@ pub fn dpdk_mbuf_free(m: *mut rte_mbuf) {
 // This is rte_pktmbuf_free() which is declared as inline and hence bindgen
 // does not generate the bindings. The original rte_pktmbuf_free() has cache
 // allocation etc. which is ignored below, it directly goes to the pool
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn dpdk_mbuf_alloc(mp: *mut rte_mempool) -> Option<*mut rte_mbuf> {
     unsafe {
-        let mut m: *mut libc::c_void = 0 as *mut libc::c_void;
+        let mut m: *mut libc::c_void = std::ptr::null_mut::<libc::c_void>();
         let ops: *mut rte_mempool_ops = &mut rte_mempool_ops_table.ops[(*mp).ops_index as usize];
         let cb = (*ops).dequeue.unwrap();
         cb(mp, &mut m, 1);
-        if m != 0 as *mut libc::c_void {
+        if !m.is_null() {
             Some(m as *mut rte_mbuf)
         } else {
             None
@@ -65,6 +72,7 @@ pub fn dpdk_mbuf_alloc(mp: *mut rte_mempool) -> Option<*mut rte_mbuf> {
 }
 
 // This is rte_pktmbuf_mtod_offset(), bindgen not generated because of inline
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub fn dpdk_mtod(m: *mut rte_mbuf) -> *mut u8 {
     unsafe {
         let addr: *mut u8 = (*m).buf_addr as *mut u8;

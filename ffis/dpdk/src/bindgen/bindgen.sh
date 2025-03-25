@@ -18,4 +18,4 @@ do
    allowv="${allowv}|${i}"
 done
 
-bindgen headers.h --whitelist-function $allowf --whitelist-type $allowt --whitelist-var $allowv -o include/lib.rs
+bindgen headers.h --raw-line "#![allow(clippy::all)]" --raw-line "#![allow(dead_code)]" --allowlist-function $allowf --allowlist-type $allowt --allowlist-var $allowv -o include/lib.rs

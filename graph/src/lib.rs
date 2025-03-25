@@ -50,7 +50,7 @@ pub struct Dispatch<'d> {
     wakeup: usize,
 }
 
-impl<'d> Dispatch<'d> {
+impl Dispatch<'_> {
     /// Get one of the packets queued up for a node
     pub fn pop(&mut self) -> Option<BoxPkt> {
         self.vectors[self.node].pop_front()
@@ -292,7 +292,7 @@ impl<T> Graph<T> {
         while let Ok(p) = self.queue.pop() {
             self.pool.free(p);
         }
-        let mut nsecs = std::usize::MAX;
+        let mut nsecs = usize::MAX;
         let mut work = false;
         for n in 0..self.nodes.len() {
             let node = &mut self.nodes[n];
@@ -304,7 +304,7 @@ impl<T> Graph<T> {
                 counters: &mut self.counters,
                 nodes: &node.next_nodes,
                 work: false,
-                wakeup: std::usize::MAX,
+                wakeup: usize::MAX,
             };
             self.perf[n].start();
             client.dispatch(self.thread, &mut d);
@@ -342,7 +342,7 @@ impl<T> Gclient<T> for DropNode {
     }
 
     fn dispatch(&mut self, _thread: usize, vectors: &mut Dispatch) {
-        while let Some(_) = vectors.pop() {
+        while vectors.pop().is_some() {
             self.count.incr();
         }
     }
