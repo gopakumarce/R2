@@ -1,10 +1,38 @@
 ---
-title: "DPDK"
 weight: 1
 type: docs
 description: >
 
 ---
+
+# Compiling with dpdk
+
+Install dpdk as below (snippet below gives the tested version)
+
+```
+sudo apt-get install python3 ninja-build meson
+curl https://fast.dpdk.org/rel/dpdk-19.11.3.tar.xz -o dpdk.tar.xz
+tar xf dpdk.tar.xz
+cd dpdk-stable-19.11.3
+meson build
+cd build
+ninja
+sudo ninja install
+```
+
+And then do "cargo build --features dpdk"
+
+NOTE: To update to a different dpdk version, go to ffis/dpdk and run bindgen.sh 
+there. Note that the produced rust bindings might need minor tweaks to get it 
+compiled, for example dpdk C code has an aligned structure placed inside a packed
+structure (see comments about rte_ether_addr in bindgen/include/lib.rs) which
+rust cannot support, so that needed a manual tweak
+
+What we support is a simple AF_PACKET dpdk driver, just to ensure that the general
+process of initializing dpdk and working with its apis are all in place. To switch
+to a regular PCI driver "hopefully" does not involve code changes and is transparent
+to the users of the dpdk library. It of course will involve configuring hugepages and
+such which are general dpdk setup procedures outside the purview of this code 
 
 # DPDK interacting with R2
 
@@ -14,7 +42,7 @@ Rust big time - all FFI is unsafe code! So use of DPDK should be a transit path 
 
 ## Configuration
 
-In the r2 config file (see Docs/r2_configs.md), add a section called dpdk as below. The on=true means R2 is running with dpdk enabled, it can be set to false and then rest of the dpdk configs dont matter because dpdk is turned off. The mem=128 says dpdk uses 128Mb for mbuf pool. The ncores=3 says that core0 is used as the main core (non data plane) and core1 and core2 are the data plane cores. core0 is used as the main core always as of today
+In the r2 config file add a section called dpdk as below. The on=true means R2 is running with dpdk enabled, it can be set to false and then rest of the dpdk configs dont matter because dpdk is turned off. The mem=128 says dpdk uses 128Mb for mbuf pool. The ncores=3 says that core0 is used as the main core (non data plane) and core1 and core2 are the data plane cores. core0 is used as the main core always as of today
 
 ```
 [dpdk]

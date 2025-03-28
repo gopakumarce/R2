@@ -23,4 +23,4 @@ This means that r2 should run with with a pool of 4096 packets and 8192 particle
 
 # dpdk
 
-See dpdk/dpdk.md to see the dpdk configuration options
+See [dpdk](../dpdk) to see the dpdk configuration options

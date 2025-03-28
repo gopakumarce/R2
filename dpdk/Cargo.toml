@@ -7,8 +7,11 @@ edition = "2018"
 [dependencies]
 libc = "0.2.0"
 crossbeam-queue = "0.2.1"
-dpdk-ffi = { path = "../ffis/dpdk" }
+dpdk-ffi = { path = "../ffis/dpdk", optional = true }
 graph = { path = "../graph" }
 packet = { path = "../packet" }
 counters = { path = "../counters" }
 socket = { path = "../unix/socket" }
+
+[features]
+"dpdk" = ["dep:dpdk-ffi"]

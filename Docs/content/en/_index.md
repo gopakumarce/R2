@@ -21,5 +21,6 @@ code in each code module
 * [R2Configs](r2configs/)
 * [Tryme](tryme/)
 * [Unsafe](unsafe/)
+* [DPDK Support](dpdk/)
 
 
