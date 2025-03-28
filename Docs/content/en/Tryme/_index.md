@@ -7,6 +7,9 @@ description: >
 
 # Trying R2 
 
+NOTE: R2 compiles and works only on linux as of now, tested on Ubuntu 20.04, although any later version
+of Ubuntu should work too
+
 The goal here is to provide a test setup as below, where R2_client1 and R2_client2 are two docker containers from which we can originate packets like ping and R2 in the middle, is the router.
 
 ```c
@@ -44,7 +47,7 @@ The steps below have been tested on brand new Ubuntu installations 18.04 and 16.
   
    ```c
    sudo apt install git
-   git clone git@github.com:gopakumarce/R2.git
+   git clone https://github.com/gopakumarce/R2.git
    ```
 
 4. In the R2 source code root directory, type the below command. The first two commands 'sudo usermod' and 'newgrp docker' adds your user to the docker group so you can create docker containers etc.. with your userid. The first time compilation can take a few seconds, the R2 build system 'cargo', downloads source code for all dependencies and compiles them them the first time. NOTE: Various things inside the script like creating new interfaces etc.., are also run with 'sudo' permissions
