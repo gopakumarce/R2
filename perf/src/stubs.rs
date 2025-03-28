@@ -3,7 +3,7 @@ use counters::Counters;
 pub struct Perf {}
 
 impl Perf {
-    pub fn new(name: &str, counters: &mut Counters) -> Self {
+    pub fn new(_: &str, _: &mut Counters) -> Self {
         Perf {}
     }
 
